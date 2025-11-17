@@ -2,4 +2,6 @@ fastapi
 uvicorn
 python-multipart
 pydantic
-PyMuPDF==1.23.26
+pymupdf==1.23.26
+
+
