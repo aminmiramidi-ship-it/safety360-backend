@@ -1,4 +1,5 @@
 from fastapi import FastAPI, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
 import fitz  # PyMuPDF
 import pdfplumber
 import uuid
@@ -6,8 +7,23 @@ import os
 
 app = FastAPI()
 
+# ---------------------------
+# CORS
+# ---------------------------
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # später Domain eintragen
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ---------------------------
+# Upload Directory
+# ---------------------------
 UPLOAD_DIR = "uploaded_files"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
 
 # ---------------------------
 # STATUS CHECK
@@ -44,6 +60,7 @@ async def extract_pdf_text(file: UploadFile = File(...)):
     file_id = str(uuid.uuid4())
     file_path = f"{UPLOAD_DIR}/{file_id}_{file.filename}"
 
+    # Datei speichern
     with open(file_path, "wb") as f:
         f.write(await file.read())
 
@@ -57,13 +74,14 @@ async def extract_pdf_text(file: UploadFile = File(...)):
     for page_number in range(len(doc)):
         page = doc.load_page(page_number)
         text = page.get_text("text")
-        full_text += f"\n\n--- Seite {page_number+1} ---\n{text}"
+        full_text += f"\n\n--- Seite {page_number + 1} ---\n{text}"
 
+    page_count = len(doc)
     doc.close()
 
     return {
         "filename": file.filename,
-        "pages": len(doc),
+        "pages": page_count,
         "extracted_text": full_text
     }
 
@@ -76,6 +94,7 @@ async def extract_tables(file: UploadFile = File(...)):
     file_id = str(uuid.uuid4())
     file_path = f"{UPLOAD_DIR}/{file_id}_{file.filename}"
 
+    # Datei speichern
     with open(file_path, "wb") as f:
         f.write(await file.read())
 
@@ -90,6 +109,7 @@ async def extract_tables(file: UploadFile = File(...)):
                         "page": page_num + 1,
                         "tables": tables
                     })
+
     except Exception as e:
         return {"error": f"Tabellen konnten nicht extrahiert werden: {str(e)}"}
 
