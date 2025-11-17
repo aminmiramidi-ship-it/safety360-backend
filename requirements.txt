@@ -3,6 +3,8 @@ uvicorn
 python-multipart
 pydantic
 pymupdf==1.22.5
+pdfplumber
+
 
 
 
