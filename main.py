@@ -5,201 +5,210 @@ import fitz  # PyMuPDF
 import pdfplumber
 import uuid
 import os
+import shutil
 
 app = FastAPI()
 
-# ---------------------------
+# ----------------------------------
 # CORS
-# ---------------------------
+# ----------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # später Domain anpassen
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ---------------------------
-# Upload Directory
-# ---------------------------
+# ----------------------------------
+# WORK DIR
+# ----------------------------------
 UPLOAD_DIR = "uploaded_files"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# ---------------------------
+
+# ----------------------------------
 # STATUS CHECK
-# ---------------------------
+# ----------------------------------
 @app.get("/status")
 def status():
     return {"status": "running"}
 
-# ---------------------------
+
+# ----------------------------------
 # FILE UPLOAD
-# ---------------------------
+# ----------------------------------
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
     file_id = str(uuid.uuid4())
     file_path = f"{UPLOAD_DIR}/{file_id}_{file.filename}"
+
     with open(file_path, "wb") as f:
         f.write(await file.read())
+
     return {
-        "message": "Datei erfolgreich empfangen",
+        "message": "Datei erfolgreich hochgeladen",
         "filename": file.filename,
         "file_id": file_id,
-        "size": os.path.getsize(file_path),
         "stored_path": file_path,
+        "size": os.path.getsize(file_path),
     }
 
-# ---------------------------
-# PDF TEXT EXTRACTION
-# ---------------------------
-@app.post("/extract/text")
-async def extract_pdf_text(file: UploadFile = File(...)):
-    file_id = str(uuid.uuid4())
-    file_path = f"{UPLOAD_DIR}/{file_id}_{file.filename}"
 
-    with open(file_path, "wb") as f:
+# ----------------------------------
+# EXTRACT TEXT
+# ----------------------------------
+@app.post("/extract/text")
+async def extract_text(file: UploadFile = File(...)):
+    file_id = str(uuid.uuid4())
+    path = f"{UPLOAD_DIR}/{file_id}_{file.filename}"
+
+    with open(path, "wb") as f:
         f.write(await file.read())
 
     try:
-        doc = fitz.open(file_path)
+        doc = fitz.open(path)
     except Exception as e:
-        return {"error": f"PDF konnte nicht geöffnet werden: {str(e)}"}
+        return {"error": str(e)}
 
-    full_text = ""
-    for page_number in range(len(doc)):
-        page = doc.load_page(page_number)
+    result = ""
+    for i in range(len(doc)):
+        page = doc.load_page(i)
         text = page.get_text("text")
-        full_text += f"\n\n--- Seite {page_number + 1} ---\n{text or ''}"
+        result += f"\n--- Seite {i+1} ---\n{text}"
 
-    page_count = len(doc)
     doc.close()
 
     return {
         "filename": file.filename,
-        "pages": page_count,
-        "extracted_text": full_text,
+        "pages": len(result.split("--- Seite")),
+        "extracted_text": result,
     }
 
-# ---------------------------
-# PDF TABLE EXTRACTION
-# ---------------------------
+
+# ----------------------------------
+# EXTRACT TABLES
+# ----------------------------------
 @app.post("/extract/tables")
 async def extract_tables(file: UploadFile = File(...)):
     file_id = str(uuid.uuid4())
-    file_path = f"{UPLOAD_DIR}/{file_id}_{file.filename}"
-
-    with open(file_path, "wb") as f:
+    path = f"{UPLOAD_DIR}/{file_id}_{file.filename}"
+    with open(path, "wb") as f:
         f.write(await file.read())
 
-    tables_output = []
+    tables_out = []
+
     try:
-        with pdfplumber.open(file_path) as pdf:
-            for page_num, page in enumerate(pdf.pages):
+        with pdfplumber.open(path) as pdf:
+            for p, page in enumerate(pdf.pages):
                 tables = page.extract_tables()
                 if tables:
-                    tables_output.append({
-                        "page": page_num + 1,
-                        "tables": tables,
-                    })
+                    tables_out.append({"page": p + 1, "tables": tables})
     except Exception as e:
-        return {"error": f"Tabellen konnten nicht extrahiert werden: {str(e)}"}
+        return {"error": str(e)}
 
     return {
         "filename": file.filename,
-        "table_count": len(tables_output),
-        "tables": tables_output,
+        "table_count": len(tables_out),
+        "tables": tables_out,
     }
 
-# ---------------------------
-# PDF IMAGE EXTRACTION
-# ---------------------------
-@app.post("/extract/images")
-async def extract_pdf_images(file: UploadFile = File(...)):
-    file_id = str(uuid.uuid4())
-    file_path = f"{UPLOAD_DIR}/{file_id}_{file.filename}"
 
-    with open(file_path, "wb") as f:
+# ----------------------------------
+# EXTRACT IMAGES
+# ----------------------------------
+@app.post("/extract/images")
+async def extract_images(file: UploadFile = File(...)):
+    file_id = str(uuid.uuid4())
+    path = f"{UPLOAD_DIR}/{file_id}_{file.filename}"
+    with open(path, "wb") as f:
         f.write(await file.read())
 
     try:
-        doc = fitz.open(file_path)
+        doc = fitz.open(path)
     except Exception as e:
-        return {"error": f"PDF konnte nicht geöffnet werden: {str(e)}"}
+        return {"error": str(e)}
 
-    image_results = []
-    image_dir = f"{UPLOAD_DIR}/{file_id}_images"
-    os.makedirs(image_dir, exist_ok=True)
+    img_dir = f"{UPLOAD_DIR}/{file_id}_images"
+    os.makedirs(img_dir, exist_ok=True)
+    results = []
 
-    for page_index in range(len(doc)):
-        page = doc.load_page(page_index)
-        images = page.get_images(full=True)
-        for img_index, img in enumerate(images):
+    for i in range(len(doc)):
+        page = doc.load_page(i)
+        imgs = page.get_images(full=True)
+
+        for idx, img in enumerate(imgs):
             xref = img[0]
             pix = fitz.Pixmap(doc, xref)
-            img_path = f"{image_dir}/page{page_index+1}_img{img_index+1}.png"
+
+            img_path = f"{img_dir}/p{i+1}_img{idx+1}.png"
+
             if pix.n < 5:
                 pix.save(img_path)
             else:
-                rgb_pix = fitz.Pixmap(fitz.csRGB, pix)
-                rgb_pix.save(img_path)
-                rgb_pix = None
-            image_results.append(img_path)
+                rgb = fitz.Pixmap(fitz.csRGB, pix)
+                rgb.save(img_path)
+                rgb = None
+
+            results.append(img_path)
 
     doc.close()
 
     return {
         "filename": file.filename,
-        "image_count": len(image_results),
-        "image_paths": image_results,
+        "image_count": len(results),
+        "image_paths": results,
     }
 
-# ---------------------------
-# PDF METADATA EXTRACTION
-# ---------------------------
-@app.post("/extract/meta")
-async def extract_pdf_metadata(file: UploadFile = File(...)):
-    file_id = str(uuid.uuid4())
-    file_path = f"{UPLOAD_DIR}/{file_id}_{file.filename}"
 
-    with open(file_path, "wb") as f:
+# ----------------------------------
+# EXTRACT METADATA
+# ----------------------------------
+@app.post("/extract/meta")
+async def extract_meta(file: UploadFile = File(...)):
+    file_id = str(uuid.uuid4())
+    path = f"{UPLOAD_DIR}/{file_id}_{file.filename}"
+
+    with open(path, "wb") as f:
         f.write(await file.read())
 
     try:
-        doc = fitz.open(file_path)
+        doc = fitz.open(path)
     except Exception as e:
-        return {"error": f"PDF konnte nicht geöffnet werden: {str(e)}"}
+        return {"error": str(e)}
 
     metadata = doc.metadata or {}
-    page_count = len(doc)
+    pages = len(doc)
 
     fonts = set()
     for page in doc:
-        text_dict = page.get_text("dict") or {}
-        for block in text_dict.get("blocks", []):
-            for line in block.get("lines", []):
-                for span in line.get("spans", []):
-                    font_name = span.get("font")
-                    if font_name:
-                        fonts.add(font_name)
+        content = page.get_text("dict")
+        for block in content.get("blocks", []):
+            for l in block.get("lines", []):
+                for s in l.get("spans", []):
+                    font = s.get("font")
+                    if font:
+                        fonts.add(font)
 
     doc.close()
 
     return {
         "filename": file.filename,
-        "pages": page_count,
+        "pages": pages,
         "metadata": metadata,
         "fonts_used": list(fonts),
     }
 
-# ---------------------------
-# SERVE FILES
-# ---------------------------
+
+# ----------------------------------
+# FILE DOWNLOAD
+# ----------------------------------
 @app.get("/files/{file_path:path}")
 async def serve_file(file_path: str):
-    full_path = os.path.join(UPLOAD_DIR, file_path)
-    if not os.path.isfile(full_path):
+    full = os.path.join(UPLOAD_DIR, file_path)
+    if not os.path.isfile(full):
         return JSONResponse(
             status_code=404,
-            content={"error": f"Datei nicht gefunden: {file_path}"},
+            content={"error": f"Datei {file_path} nicht gefunden"},
         )
-    return FileResponse(full_path)
+    return FileResponse(full)
