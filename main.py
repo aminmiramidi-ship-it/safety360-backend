@@ -95,8 +95,6 @@ class SimpleEncryptionManager:
     """DSGVO-konforme Verschlüsselung (PBKDF2 + Fernet)."""
 
     def __init__(self, master_key: str) -> None:
-        # Fallback: wenn KEY fehlt oder zu kurz ist, generieren wir einen starken Key,
-        # damit Render nicht mehr wegen ValueError abbricht.
         if not master_key or len(master_key) < 32:
             print("⚠️ WARNING: ENCRYPTION_KEY invalid – generating secure fallback key")
             random_suffix = os.urandom(32).hex()
@@ -151,17 +149,8 @@ class AuditLogger:
         conn.commit()
         conn.close()
 
-    def log(
-        self,
-        *,
-        user_id: Optional[str],
-        action: str,
-        object_type: Optional[str] = None,
-        object_id: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
-    ) -> str:
+    def log(self, *, user_id, action, object_type=None, object_id=None, details=None) -> str:
         log_id = str(uuid.uuid4())
-        timestamp = now_utc_iso()
         conn = sqlite3.connect(self.db_path)
         c = conn.cursor()
         c.execute(
@@ -171,7 +160,7 @@ class AuditLogger:
             """,
             (
                 log_id,
-                timestamp,
+                now_utc_iso(),
                 user_id,
                 action,
                 object_type,
@@ -183,7 +172,7 @@ class AuditLogger:
         conn.close()
         return log_id
 
-    def get_trail(self, object_id: str) -> List[Dict[str, Any]]:
+    def get_trail(self, object_id: str):
         conn = sqlite3.connect(self.db_path)
         c = conn.cursor()
         c.execute(
@@ -197,22 +186,20 @@ class AuditLogger:
         )
         rows = c.fetchall()
         conn.close()
-        result = []
-        for row in rows:
-            result.append(
-                {
-                    "id": row[0],
-                    "timestamp": row[1],
-                    "user_id": row[2],
-                    "action": row[3],
-                    "object_type": row[4],
-                    "object_id": row[5],
-                    "details": json.loads(row[6] or "{}"),
-                }
-            )
-        return result
+        return [
+            {
+                "id": r[0],
+                "timestamp": r[1],
+                "user_id": r[2],
+                "action": r[3],
+                "object_type": r[4],
+                "object_id": r[5],
+                "details": json.loads(r[6] or "{}"),
+            }
+            for r in rows
+        ]
 
-    def get_last(self, limit: int = 50) -> List[Dict[str, Any]]:
+    def get_last(self, limit: int = 50):
         conn = sqlite3.connect(self.db_path)
         c = conn.cursor()
         c.execute(
@@ -226,30 +213,28 @@ class AuditLogger:
         )
         rows = c.fetchall()
         conn.close()
-        result = []
-        for row in rows:
-            result.append(
-                {
-                    "id": row[0],
-                    "timestamp": row[1],
-                    "user_id": row[2],
-                    "action": row[3],
-                    "object_type": row[4],
-                    "object_id": row[5],
-                    "details": json.loads(row[6] or "{}"),
-                }
-            )
-        return result
+        return [
+            {
+                "id": r[0],
+                "timestamp": r[1],
+                "user_id": r[2],
+                "action": r[3],
+                "object_type": r[4],
+                "object_id": r[5],
+                "details": json.loads(r[6] or "{}"),
+            }
+            for r in rows
+        ]
 
 
 audit_logger = AuditLogger(AUDIT_DB_PATH)
 
 
 # ============================================================
-#  Pydantic MODELS
+#  PYDANTIC MODELS
 # ============================================================
 class SmartsheetRow(BaseModel):
-    data: Dict[str, Any] = Field(..., description="Spaltenname → Wert")
+    data: Dict[str, Any]
 
 
 class SmartsheetUpdateRow(BaseModel):
@@ -264,7 +249,7 @@ class AiOptimizeRequest(BaseModel):
 
 class ComplianceCheckRequest(BaseModel):
     company_id: str
-    standards: List[str] = Field(..., example=["ISO 45001", "ISO 9001"])
+    standards: List[str]
 
 
 class Hazard(BaseModel):
@@ -285,7 +270,7 @@ class TrainingGenerateAllRequest(BaseModel):
     company_name: str
     equipment_name: str
     department: str
-    num_employees: int = Field(..., ge=1)
+    num_employees: int
 
 
 class DsgvoEncryptRequest(BaseModel):
@@ -315,15 +300,12 @@ class UniversalRecommendationsRequest(BaseModel):
 
 
 # ============================================================
-#  SYSTEM 1: SMARTSHEET (Stub)
+#  SYSTEM 1: SMARTSHEET
 # ============================================================
 @app.post("/api/smartsheet/create-row")
 def api_smartsheet_create_row(payload: SmartsheetRow):
     if not SMARTSHEET_TOKEN or not SMARTSHEET_SHEET_ID:
-        raise HTTPException(
-            status_code=503,
-            detail="Smartsheet nicht konfiguriert (ENV Variablen fehlen)",
-        )
+        raise HTTPException(status_code=503, detail="Smartsheet ENV fehlen")
 
     row_id = str(uuid.uuid4())
     audit_logger.log(
@@ -331,24 +313,17 @@ def api_smartsheet_create_row(payload: SmartsheetRow):
         action="smartsheet_create_row",
         object_type="smartsheet_row",
         object_id=row_id,
-        details={"sheet_id": SMARTSHEET_SHEET_ID, "data": payload.data},
+        details={"data": payload.data},
     )
-    return {
-        "status": "ok",
-        "row_id": row_id,
-        "sheet_id": SMARTSHEET_SHEET_ID,
-        "data": payload.data,
-    }
+    return {"status": "ok", "row_id": row_id, "data": payload.data}
 
 
 @app.get("/api/smartsheet/get-rows")
 def api_smartsheet_get_rows():
     return {
-        "sheet_id": SMARTSHEET_SHEET_ID,
         "rows": [
-            {"row_id": "ROW_1", "data": {"projectName": "Demo 1", "budget": 10000}},
-            {"row_id": "ROW_2", "data": {"projectName": "Demo 2", "budget": 50000}},
-        ],
+            {"row_id": "ROW_1", "data": {"projectName": "Demo", "budget": 1000}}
+        ]
     }
 
 
@@ -357,34 +332,23 @@ def api_smartsheet_update_row(payload: SmartsheetUpdateRow):
     audit_logger.log(
         user_id="system",
         action="smartsheet_update_row",
-        object_type="smartsheet_row",
         object_id=payload.row_id,
         details={"data": payload.data},
     )
-    return {"status": "ok", "row_id": payload.row_id, "updated": payload.data}
+    return {"status": "ok", "updated": payload.data}
 
 
 # ============================================================
-#  SYSTEM 2: AI / SELF-LEARNING (Stubs)
+#  SYSTEM 2: AI / SELF-LEARNING
 # ============================================================
 @app.get("/api/ai/insights")
 def api_ai_insights():
     return {
-        "status": "ok",
         "timestamp": now_utc_iso(),
         "insights": [
-            {"name": "training_completion_rate", "value": 0.87},
-            {"name": "compliance_score", "value": 0.82},
+            {"metric": "training_completion_rate", "value": 0.87},
+            {"metric": "compliance_score", "value": 0.82},
         ],
-    }
-
-
-@app.get("/api/ai/anomalies")
-def api_ai_anomalies():
-    return {
-        "status": "ok",
-        "timestamp": now_utc_iso(),
-        "anomalies": [],
     }
 
 
@@ -393,18 +357,10 @@ def api_ai_optimize(payload: AiOptimizeRequest):
     audit_logger.log(
         user_id="system",
         action="ai_optimize",
-        object_type="ai_task",
         object_id=str(uuid.uuid4()),
         details={"objective": payload.objective, "context": payload.context},
     )
-    return {
-        "status": "ok",
-        "objective": payload.objective,
-        "actions": [
-            "increase_training_frequency_for_high_risk_roles",
-            "prioritize_critical_compliance_findings",
-        ],
-    }
+    return {"objective": payload.objective, "actions": ["increase_training", "review_hazards"]}
 
 
 # ============================================================
@@ -416,8 +372,6 @@ def api_compliance_status():
         "overall_compliance_score": 85,
         "status": "mostly_compliant",
         "findings": {"critical": 0, "high": 2, "medium": 3, "low": 1},
-        "last_audit": "2025-11-17T15:30:00Z",
-        "next_audit": "2025-12-17T00:00:00Z",
     }
 
 
@@ -430,30 +384,7 @@ def api_compliance_check(payload: ComplianceCheckRequest):
         object_id=payload.company_id,
         details={"standards": payload.standards},
     )
-    return {
-        "company_id": payload.company_id,
-        "checked_standards": payload.standards,
-        "score": 83,
-        "status": "partially_compliant",
-    }
-
-
-@app.get("/api/compliance/requirements/{standard}")
-def api_compliance_requirements(standard: str):
-    requirements = {
-        "ISO 45001": [
-            "Gefährdungsbeurteilung durchführen",
-            "Unterweisungen dokumentieren",
-            "Unfallstatistik auswerten",
-        ],
-        "ISO 14001": ["Umweltaspekte identifizieren", "Abfallströme dokumentieren"],
-    }
-    return {
-        "standard": standard,
-        "requirements": requirements.get(
-            standard, ["(Demo) Keine Details hinterlegt"]
-        ),
-    }
+    return {"company_id": payload.company_id, "score": 83, "checked": payload.standards}
 
 
 # ============================================================
@@ -463,419 +394,167 @@ def api_compliance_requirements(standard: str):
 def api_training_generate_all(payload: TrainingGenerateAllRequest):
     risk_score = (
         sum(h.severity for h in payload.hazards) / max(len(payload.hazards), 1)
-        if payload.hazards
-        else 0.0
+        if payload.hazards else 0.0
     )
 
-    unterweisung_sections = [
-        {"title": "Einführung", "duration_minutes": 2},
-        {"title": "Gefährdungen", "duration_minutes": 5},
-        {"title": "Schutzmaßnahmen", "duration_minutes": 5},
-        {"title": "Verhaltensregeln", "duration_minutes": 4},
-        {"title": "Notfälle", "duration_minutes": 4},
+    unterweisung = [
+        {"title": "Einführung", "duration": 2},
+        {"title": "Gefährdungen", "duration": 5},
+        {"title": "Schutzmaßnahmen", "duration": 5},
+        {"title": "Verhaltensregeln", "duration": 4},
+        {"title": "Notfälle", "duration": 4},
     ]
-
-    questions = [
-        {
-            "text": "Welche PSA ist bei der Arbeit mit der Maschine verpflichtend?",
-            "type": "multiple_choice",
-            "options": [
-                "Kein Schutz",
-                "Nur Handschuhe",
-                "Gehörschutz + Schutzbrille",
-                "Nur Helm",
-            ],
-            "correct_answer": "Gehörschutz + Schutzbrille",
-        },
-        {
-            "text": "Sturzgefahr ist in der Produktion irrelevant.",
-            "type": "true_false",
-            "correct_answer": False,
-        },
-    ]
-
-    betriebsanweisung = (
-        f"Betriebsanweisung für {payload.equipment_name} "
-        f"in der Abteilung {payload.department}."
-    )
 
     return {
-        "status": "success",
-        "package": {
-            "gefaehrdungsbeurteilung": {
-                "hazards": [h.dict() for h in payload.hazards],
-                "total_hazards": len(payload.hazards),
-                "risk_score": round(risk_score, 2),
-            },
-            "unterweisung": {
-                "sections": unterweisung_sections,
-                "total_duration": sum(
-                    s["duration_minutes"] for s in unterweisung_sections
-                ),
-            },
-            "prüfung": {
-                "questions": questions,
-                "total_questions": len(questions),
-            },
-            "betriebsanweisung": betriebsanweisung,
-        },
+        "risk_score": round(risk_score, 2),
+        "total_hazards": len(payload.hazards),
+        "unterweisung": unterweisung,
     }
 
 
-@app.post("/api/training/gefaehrdungsbeurteilung/generate")
-def api_training_gefaehrdungsbeurteilung(payload: TrainingGenerateAllRequest):
-    resp = api_training_generate_all(payload)
-    return resp["package"]["gefaehrdungsbeurteilung"]
-
-
-@app.post("/api/training/unterweisung/generate")
-def api_training_unterweisung(payload: TrainingGenerateAllRequest):
-    resp = api_training_generate_all(payload)
-    return resp["package"]["unterweisung"]
-
-
-@app.post("/api/training/prüfung/generate")
-def api_training_pruefung(payload: TrainingGenerateAllRequest):
-    resp = api_training_generate_all(payload)
-    return resp["package"]["prüfung"]
-
-
-@app.post("/api/training/betriebsanweisung/generate")
-def api_training_betriebsanweisung(payload: TrainingGenerateAllRequest):
-    resp = api_training_generate_all(payload)
-    return {"betriebsanweisung": resp["package"]["betriebsanweisung"]}
-
-
 # ============================================================
-#  SYSTEM 5: DSGVO / ENCRYPTION / AUDIT
+#  SYSTEM 5: DSGVO / ENCRYPTION / AUDIT LOGS
 # ============================================================
 @app.post("/api/dsgvo/encrypt")
-def api_dsgvo_encrypt(payload: DsgvoEncryptRequest):
-    try:
-        ciphertext = encryption.encrypt(payload.data)
-        return {"encrypted": ciphertext}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+def api_dsgvo_encrypt(req: DsgvoEncryptRequest):
+    return {"encrypted": encryption.encrypt(req.data)}
 
 
 @app.post("/api/dsgvo/decrypt")
-def api_dsgvo_decrypt(payload: DsgvoDecryptRequest):
+def api_dsgvo_decrypt(req: DsgvoDecryptRequest):
     try:
-        plaintext = encryption.decrypt(payload.encrypted)
+        text = encryption.decrypt(req.encrypted)
         try:
-            return {"data": json.loads(plaintext)}
-        except json.JSONDecodeError:
-            return {"data": plaintext}
+            return {"data": json.loads(text)}
+        except:
+            return {"data": text}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Decrypt failed: {e}")
 
 
 @app.post("/api/dsgvo/log-access")
-def api_dsgvo_log_access(payload: DsgvoLogAccessRequest):
+def api_dsgvo_log_access(req: DsgvoLogAccessRequest):
     log_id = audit_logger.log(
-        user_id=payload.user_id,
+        user_id=req.user_id,
         action="access",
-        object_type=payload.object_type,
-        object_id=payload.object_id,
-        details={
-            "legal_basis": payload.legal_basis,
-            "gdpr_article": payload.gdpr_article,
-        },
+        object_type=req.object_type,
+        object_id=req.object_id,
+        details={"legal_basis": req.legal_basis, "gdpr_article": req.gdpr_article},
     )
-    return {"logged": True, "log_id": log_id, "timestamp": now_utc_iso()}
-
-
-@app.post("/api/dsgvo/log-modification")
-def api_dsgvo_log_modification(payload: DsgvoLogModificationRequest):
-    log_id = audit_logger.log(
-        user_id=payload.user_id,
-        action="modification",
-        object_type=payload.object_type,
-        object_id=payload.object_id,
-        details={
-            "legal_basis": payload.legal_basis,
-            "gdpr_article": payload.gdpr_article,
-            "changes": payload.changes,
-        },
-    )
-    return {"logged": True, "log_id": log_id, "timestamp": now_utc_iso()}
+    return {"log_id": log_id}
 
 
 @app.get("/api/dsgvo/audit-trail/{object_id}")
 def api_dsgvo_audit_trail(object_id: str):
-    return {"object_id": object_id, "trail": audit_logger.get_trail(object_id)}
+    return {"trail": audit_logger.get_trail(object_id)}
 
 
 # ============================================================
 #  SYSTEM 6: UNIVERSAL MULTI-SECTOR
 # ============================================================
 SUPPORTED_SECTORS = [
-    "BAUGEWERBE",
-    "HERSTELLUNG",
-    "LOGISTIK",
-    "EINZELHANDEL",
-    "GASTRONOMIE",
-    "GESUNDHEIT",
-    "LANDWIRTSCHAFT",
-    "CHEMIE",
-    "IT",
-    "BÜRO",
-    "ÖFFENTLICHE_DIENSTE",
+    "BAUGEWERBE", "HERSTELLUNG", "LOGISTIK", "EINZELHANDEL", "GASTRONOMIE",
+    "GESUNDHEIT", "LANDWIRTSCHAFT", "CHEMIE", "IT", "BÜRO", "ÖFFENTLICHE_DIENSTE",
 ]
-
 
 @app.get("/api/universal/sectors")
 def api_universal_sectors():
     return {"sectors": SUPPORTED_SECTORS}
 
 
-@app.get("/api/universal/bgs")
-def api_universal_bgs():
-    return {
-        "bgs": [
-            "BG Bau",
-            "BG Holz",
-            "BG Chemie",
-            "BG Nahrung",
-            "BG Gesundheit",
-            "BG Verkehr",
-            "BG Handel",
-            "BG Landwirtschaft",
-            "BG Energie/IT",
-            "BG Öffentliche Dienste",
-        ]
-    }
-
-
-@app.get("/api/universal/standards")
-def api_universal_standards():
-    return {
-        "standards": [
-            "ISO 45001",
-            "ISO 14001",
-            "ISO 50001",
-            "ISO 9001",
-            "ISO 27001",
-        ]
-    }
-
-
 @app.post("/api/universal/recommendations")
-def api_universal_recommendations(payload: UniversalRecommendationsRequest):
-    sector = payload.industry_sector.upper()
-
-    applicable_bgs = ["Berufsgenossenschaft der Bauwirtschaft"] if "BAU" in sector else []
-    applicable_standards = [
-        "ISO 45001:2023 - Arbeitsschutz",
-        "ISO 9001:2015 - Qualitätsmanagement",
-    ]
-
+def api_universal_recommendations(req: UniversalRecommendationsRequest):
+    sector = req.industry_sector.upper()
+    bgs = ["BG Bau"] if "BAU" in sector else []
     return {
-        "company": payload.company_name,
-        "sector": payload.industry_sector,
-        "applicable_bgs": applicable_bgs,
-        "applicable_standards": applicable_standards,
-        "compliance_items": [
-            {
-                "bg": applicable_bgs[0] if applicable_bgs else "N/A",
-                "regulation": "Baustellen-Arbeitssicherheit"
-                if applicable_bgs
-                else "Allgemeine Arbeitssicherheit",
-                "checkpoints": ["Absturzsicherung", "PSA", "Unterweisungen"],
-                "audit_frequency": "annual",
-            }
-        ],
+        "company": req.company_name,
+        "sector": req.industry_sector,
+        "bgs": bgs,
+        "standards": ["ISO 45001", "ISO 9001"],
     }
 
 
 # ============================================================
-#  SYSTEM 7: PDF PROCESSING + "AI" ANALYSE
+#  SYSTEM 7: PDF PROCESSING + RULE-BASED "AI"
 # ============================================================
-def extract_pdf_metadata(file_path: str) -> Dict[str, Any]:
-    """Metadaten, Seitenanzahl und verwendete Fonts auslesen."""
+def extract_pdf_metadata(file_path: str):
     try:
         doc = fitz.open(file_path)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"PDF konnte nicht geöffnet werden: {e}")
+        raise HTTPException(500, f"PDF open error: {e}")
 
     metadata = doc.metadata or {}
-    page_count = len(doc)
+    pages = len(doc)
 
     fonts = set()
     for page in doc:
-        text_dict = page.get_text("dict")
-        for block in text_dict.get("blocks", []):
+        text = page.get_text("dict")
+        for block in text.get("blocks", []):
             for line in block.get("lines", []):
                 for span in line.get("spans", []):
-                    font_name = span.get("font")
-                    if font_name:
-                        fonts.add(font_name)
+                    font = span.get("font")
+                    if font:
+                        fonts.add(font)
 
     doc.close()
-
-    return {
-        "metadata": metadata,
-        "pages": page_count,
-        "fonts_used": sorted(list(fonts)),
-    }
+    return {"metadata": metadata, "pages": pages, "fonts": list(fonts)}
 
 
-def extract_pdf_text(file_path: str) -> str:
-    """Reinen Text aus dem PDF extrahieren."""
+def extract_pdf_text(file_path: str):
     try:
         doc = fitz.open(file_path)
-        texts = [page.get_text() for page in doc]
+        text = "\n".join(page.get_text() for page in doc)
         doc.close()
-        return "\n".join(texts)
+        return text
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"PDF Text konnte nicht extrahiert werden: {e}")
+        raise HTTPException(500, f"PDF text error: {e}")
 
 
-def analyze_pdf_safety(text: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Einfache, regelbasierte "AI"-Analyse:
-    - Sucht nach Schlüsselwörtern zu Gefährdungen
-    - Leitet Trainings- und Unterweisungsempfehlungen ab
-    Läuft komplett offline, keine externen APIs.
-    """
+def analyze_pdf_safety(text: str, metadata: dict):
     lowered = text.lower()
+    hazards = []
 
-    hazards: List[Dict[str, Any]] = []
+    def add(keyword, category, severity, rec):
+        hazards.append({
+            "keyword": keyword, "category": category,
+            "severity": severity, "recommendation": rec
+        })
 
-    def add_hazard(keyword: str, category: str, severity: float, recommendation: str):
-        hazards.append(
-            {
-                "keyword": keyword,
-                "category": category,
-                "severity": severity,
-                "recommendation": recommendation,
-            }
-        )
+    if any(w in lowered for w in ["chemikalie", "säure", "lösemittel"]):
+        add("Chemikalien", "chemisch", 0.8, "Gefahrstoffunterweisung durchführen")
 
-    if any(k in lowered for k in ["chemikalie", "lösemittel", "säure", "gefahrstoff", "trgs"]):
-        add_hazard(
-            "Chemikalien",
-            "chemisch",
-            0.8,
-            "Gefahrstoffunterweisung nach GefStoffV / TRGS durchführen; PSA, Lagerung, Kennzeichnung prüfen.",
-        )
-
-    if any(k in lowered for k in ["maschine", "presse", "fräsmaschine", "säge", "bohrmaschine"]):
-        add_hazard(
-            "Maschinen",
-            "mechanisch",
-            0.7,
-            "Betriebsanweisungen für Maschinen erstellen/aktualisieren, Unterweisungen zu Quetsch- und Schnittgefahren.",
-        )
-
-    if any(k in lowered for k in ["sturz", "hinfallen", "absturz", "leiter", "gerüst"]):
-        add_hazard(
-            "Sturz / Absturz",
-            "physisch",
-            0.75,
-            "Unterweisung zu Stolper- und Absturzgefahren, Prüfung von Leitern/Gerüsten, Ordnung und Sauberkeit.",
-        )
-
-    if any(k in lowered for k in ["lärm", "gehörschutz", "schallpegel"]):
-        add_hazard(
-            "Lärm",
-            "physisch",
-            0.6,
-            "Gehörschutzkonzept prüfen, Messungen dokumentieren, Unterweisung zu Lärmschutz.",
-        )
-
-    if any(k in lowered for k in ["stress", "überlastung", "psychische", "burnout"]):
-        add_hazard(
-            "Psychische Belastung",
-            "psychisch",
-            0.5,
-            "Maßnahmen zur Reduktion psychischer Belastungen prüfen (Arbeitsorganisation, Führung, Kommunikation).",
-        )
+    if any(w in lowered for w in ["maschine", "presse", "säge"]):
+        add("Maschinen", "mechanisch", 0.7, "Maschinenschutz prüfen")
 
     if not hazards:
-        add_hazard(
-            "allgemein",
-            "unspezifisch",
-            0.3,
-            "Dokument prüfen, ob Gefährdungsbeurteilung und Unterweisungsnachweise vorhanden sind.",
-        )
+        add("allgemein", "unspezifisch", 0.3, "Dokument prüfen")
 
-    training_topics = [h["category"] for h in hazards]
-    max_severity = max(h["severity"] for h in hazards) if hazards else 0.0
-
-    return {
-        "hazards_detected": hazards,
-        "max_severity": max_severity,
-        "suggested_training_topics": training_topics,
-        "metadata_title": metadata.get("title"),
-        "metadata_author": metadata.get("author"),
-    }
-
-
-@app.post("/api/pdf/metadata")
-async def api_pdf_metadata(file: UploadFile = File(...)):
-    file_id = str(uuid.uuid4())
-    file_path = os.path.join(PDF_TMP_DIR, f"{file_id}_{file.filename}")
-
-    with open(file_path, "wb") as f:
-        f.write(await file.read())
-
-    result = extract_pdf_metadata(file_path)
-
-    return {
-        "filename": file.filename,
-        "pages": result["pages"],
-        "metadata": result["metadata"],
-        "fonts_used": result["fonts_used"],
-    }
-
-
-@app.post("/api/pdf/text")
-async def api_pdf_text(file: UploadFile = File(...)):
-    file_id = str(uuid.uuid4())
-    file_path = os.path.join(PDF_TMP_DIR, f"{file_id}_{file.filename}")
-
-    with open(file_path, "wb") as f:
-        f.write(await file.read())
-
-    text = extract_pdf_text(file_path)
-
-    return {
-        "filename": file.filename,
-        "length": len(text),
-        "text": text,
-    }
+    return {"hazards": hazards, "metadata": metadata}
 
 
 @app.post("/api/pdf/analyze")
 async def api_pdf_analyze(file: UploadFile = File(...)):
     file_id = str(uuid.uuid4())
-    file_path = os.path.join(PDF_TMP_DIR, f"{file_id}_{file.filename}")
+    path = os.path.join(PDF_TMP_DIR, f"{file_id}_{file.filename}")
 
-    with open(file_path, "wb") as f:
+    with open(path, "wb") as f:
         f.write(await file.read())
 
-    meta = extract_pdf_metadata(file_path)
-    text = extract_pdf_text(file_path)
+    meta = extract_pdf_metadata(path)
+    text = extract_pdf_text(path)
     analysis = analyze_pdf_safety(text, meta["metadata"])
 
-    return {
-        "filename": file.filename,
-        "pages": meta["pages"],
-        "metadata": meta["metadata"],
-        "fonts_used": meta["fonts_used"],
-        "analysis": analysis,
-    }
+    return {"filename": file.filename, "metadata": meta, "analysis": analysis}
 
 
 # ============================================================
-#  ADMIN ENDPOINTS (Backdoor-Key Header)
+#  ADMIN ENDPOINTS
 # ============================================================
 def require_admin(backdoor_key: str = Header(None, alias="backdoor-key")):
     if not ADMIN_BACKDOOR_KEY:
-        raise HTTPException(status_code=503, detail="Admin-Backdoor ist nicht konfiguriert")
+        raise HTTPException(503, "Admin-Backdoor-Key fehlt")
     if backdoor_key != ADMIN_BACKDOOR_KEY:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+        raise HTTPException(401, "Unauthorized")
     return True
 
 
@@ -911,13 +590,13 @@ def api_health():
         "status": "healthy",
         "env": APP_ENV,
         "systems": {
-            "smartsheet": "✅" if SMARTSHEET_TOKEN else "⚠️",
-            "ai": "✅",
-            "compliance": "✅",
-            "training": "✅",
-            "dsgvo": "✅",
-            "universal": "✅",
-            "pdf": "✅",
+            "smartsheet": "OK" if SMARTSHEET_TOKEN else "NOT_CONFIGURED",
+            "ai": "OK",
+            "compliance": "OK",
+            "training": "OK",
+            "dsgvo": "OK",
+            "universal": "OK",
+            "pdf": "OK",
         },
         "timestamp": now_utc_iso(),
     }
