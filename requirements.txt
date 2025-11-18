@@ -1,24 +1,10 @@
 fastapi
-uvicorn[standard]
-
-python-dotenv
+uvicorn
+python-multipart
 cryptography
-
-# OpenAI API
-openai
-
-# PDF & Word Export
-fpdf2
-python-docx
-
-# PDF-Text-Extraktion (nur Text-PDF, kein Scan-OCR)
-pdfplumber
-
-# Pydantic (FastAPI Models)
+python-dotenv
 pydantic
-
-# HTTP Requests (Smartsheet etc.)
+fpdf
+python-docx
+pdfplumber
 requests
-
-
-
