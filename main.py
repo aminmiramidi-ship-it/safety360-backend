@@ -1,25 +1,69 @@
-"""
-UNIFIED SAFETY, ENERGY & QUALITY MANAGEMENT SYSTEM
-✓ ISO 45001, 14001, 50001, 9001, VDI, DGUV, BG, ArbSchG, BetrSichV integriert
-✓ Branchenübergreifend: Bau, Elektro, Montage, Büro, Metall, uvm.
-✓ Dynamische GBU, KI-Nohl-Risikoampel, KI-Checklisten, PSA, BA, Unterweisung
-✓ Self-Service, Ergänzen/Löschen/Exportieren, Ländervarianten
-✓ Externe Anbindung: Import/Upload/Webhook für Fremddokumente und Systeme
-"""
-
-import uuid, os
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query
-from typing import List, Dict, Optional
+import os
+import sqlite3
+import uuid
+from typing import List, Optional, Dict
 from enum import Enum
 
-app = FastAPI()
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from cryptography.fernet import Fernet
+
+# === .env laden ===
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+DB_URL = os.getenv("DATABASE_URL", "safety360.db")
+ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
+if not ENCRYPTION_KEY or len(ENCRYPTION_KEY) < 10:
+    ENCRYPTION_KEY = Fernet.generate_key()
+    print(f"Generated ENCRYPTION_KEY: {ENCRYPTION_KEY.decode()} (please store securely)")
+elif isinstance(ENCRYPTION_KEY, str):
+    ENCRYPTION_KEY = ENCRYPTION_KEY.encode()
+fernet = Fernet(ENCRYPTION_KEY)
+
+def encrypt(data: str) -> str:
+    return fernet.encrypt(data.encode()).decode()
+def decrypt(token: str) -> str:
+    return fernet.decrypt(token.encode()).decode()
+
+# === FastAPI & CORS ===
+app = FastAPI(title="Safety360 API", version="2.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
+)
+
+# === Datenbank ===
+conn = sqlite3.connect(DB_URL, check_same_thread=False)
+cursor = conn.cursor()
+cursor.execute("""CREATE TABLE IF NOT EXISTS tickets (
+    id INTEGER PRIMARY KEY, description TEXT, status TEXT
+)""")
+cursor.execute("""CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY, event TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+)""")
+conn.commit()
+
+# === Internationalisierung ===
+translations = {
+    "en": {
+        "certificate_text": lambda hazard, num: f"Certificate: Risk assessment for hazard '{hazard}' completed. {num} measures recommended."
+    },
+    "de": {
+        "certificate_text": lambda hazard, num: f"Zertifikat: Gefährdungsbeurteilung für Gefahr '{hazard}' abgeschlossen. {num} Maßnahmen vorgeschlagen."
+    }
+}
 
 # --- KI-basierte NOHL Risikoampel ---
 class RiskColor(str, Enum):
     RED = "ROT"
     YELLOW = "GELB"
     GREEN = "GRUEN"
-
 def nohl_risikoampel(E: int, S: int, H: int = 1):
     risiko = E * S * H
     if risiko >= 5: return {"score": risiko, "ampel": RiskColor.RED, "hinweis": "Hohes Risiko: Sofort handeln!"}
@@ -28,10 +72,33 @@ def nohl_risikoampel(E: int, S: int, H: int = 1):
 
 @app.post("/api/risk/ampel")
 def api_nohl(E: int, S: int, H: int = 1):
-    """Ampelbewertung für Risiko nach Nohl: E/S/H 1-4"""
     return nohl_risikoampel(E, S, H)
 
-# --- BRANCHEN / GEWERK / EXEMPLARMUSTER ---
+# --- PSA/Branchen/Checklisten ---
+PSA_DATA = {
+    "construction": {
+        "working at heights": {
+            "equipment": ["Safety harness", "Hard hat", "Lanyard"],
+            "regulations": ["DGUV Regel 112-198", "ArbSchG §5"]
+        },
+        "noise intensive work": {
+            "equipment": ["Ear protection", "Noise-cancelling helmet"],
+            "regulations": ["LärmVibrationsArbSchV", "DGUV Vorschrift 3"]
+        }
+    },
+    "laboratory": {
+        "chemical handling": {
+            "equipment": ["Chemical-resistant gloves", "Safety goggles", "Lab coat"],
+            "regulations": ["GefStoffV", "TRGS 526"]
+        }
+    }
+}
+HEALTH_CHECKS = {
+    "construction": ["G41 (Working at Heights exam)", "G20 (Noise exposure exam)"],
+    "laboratory": ["G42 (Chemical exposure exam)", "G37 (Screen work exam)"]
+}
+
+# --- Branchen/Normen-Baukasten ---
 BRANCHEN_KATALOG = {
     "Bau": {
         "Tätigkeiten": ["Gerüstbau", "Hochbau", "Abbruch"],
@@ -47,14 +114,12 @@ BRANCHEN_KATALOG = {
             {"hazard": "Lichtbogen", "gesetz": "DGUV 203-077", "psa": ["Schutzhelm mit Visier"], "ki": "Arbeiten freischalten, PSA, Distanz"}
         ]
     }
-    # Weitere Branchen/Metalle/Büro/... flexibel ergänzbar
 }
 NORMEN_MAP = {
     "Bau": ["ISO 45001", "ISO 14001", "BaustellenVO", "DGUV 38", "Landesbauordnung"],
     "Elektro": ["DGUV V3", "VDE 0105-100", "TRBS 2131", "ISO 50001", "VDI 2050", "ISO 45001"]
 }
 
-# ========== MUSTERBAUSTEINE ==========
 def muster_betriebsanweisung(branch, risiko):
     score = {"E": 2, "S": 3, "H": 1}
     risk = nohl_risikoampel(score["E"], score["S"], score["H"])
@@ -70,7 +135,6 @@ def muster_betriebsanweisung(branch, risiko):
             {"abschnitt": "Risikoampel", "inhalt": str(risk)},
         ]
     }
-
 def muster_unterweisung(branch, risiko):
     return {
         "thema": f"Unterweisung {risiko['hazard']}",
@@ -81,7 +145,26 @@ def muster_unterweisung(branch, risiko):
         ]
     }
 
-@app.get("/api/job/checkliste")
+# --- API-Endpunkte ---
+@app.get("/psa")
+def get_psa(industry: str, activity: str):
+    ind = industry.lower()
+    act = activity.lower()
+    if ind in PSA_DATA and act in PSA_DATA[ind]:
+        data = PSA_DATA[ind][act]
+        return {"industry": ind, "activity": act, "equipment": data["equipment"], "regulations": data["regulations"]}
+    raise HTTPException(status_code=404, detail="No PSA data for this industry/activity combination.")
+
+@app.get("/health-checks")
+def get_health_checks(industry: str):
+    ind = industry.lower()
+    checks = HEALTH_CHECKS.get(ind)
+    if checks:
+        return {"industry": ind, "required_examinations": checks}
+    else:
+        raise HTTPException(status_code=404, detail="No health check data for this industry.")
+
+@app.post("/api/job/checkliste")
 def get_branch_checklist(branch: str):
     if branch not in BRANCHEN_KATALOG:
         raise HTTPException(404, "Branche nicht vorhanden")
@@ -106,56 +189,80 @@ def get_branch_checklist(branch: str):
         "punkte": vorschlag
     }
 
-# --- BAUSTELLEN|CONTRACTOR|LÄNDER|KI ---
-BAUSTELLEN_CHECKLISTE = [
-    {"nr": "BS01", "frage": "Ist der aktuelle SiGe-Plan vor Ort und allen bekannt?", "gesetz": "BaustellenVO, DGUV", "ki_help": "KI prüft Upload/Gültigkeit, erinnert bei Änderungen."},
-    # ... weitere Aufgaben, siehe oben ...
-]
-BUNDESLAND_EXTRA = {
-    "NRW": ["BG Bau-Meldung ab 500qm", "Altbauten-Zugang extra prüfen"], "BY": ["Brandschutz Baurecht beachten"]
-}
+# == Admin, Tickets, Import, Export, Audit-Log, WebSocket etc. ==
+class TicketCreate(BaseModel):
+    description: str
+    status: Optional[str] = "open"
+class ExportData(BaseModel):
+    lines: List[str]
 
-@app.get("/api/baustelle/checkliste")
-def checkliste_baustelle(gewerk: str, bundesland: str):
-    ki_tipps = BUNDESLAND_EXTRA.get(bundesland, []) + ["KI prüft Gewerke-GBU und alle Unterlagen automatisch."]
-    return {
-        "gewerk": gewerk,
-        "bundesland": bundesland,
-        "normen": ["ISO 45001", "ISO 14001", "ISO 50001", "BaustellenVO", "DGUV", "LandesbauO"],
-        "checklistenpunkte": BAUSTELLEN_CHECKLISTE,
-        "ki_tipps": ki_tipps
-    }
+@app.post("/tickets")
+def create_ticket(ticket: TicketCreate):
+    desc_enc = encrypt(ticket.description)
+    status = ticket.status or "open"
+    cursor.execute("INSERT INTO tickets (description, status) VALUES (?, ?)", (desc_enc, status))
+    conn.commit()
+    ticket_id = cursor.lastrowid
+    cursor.execute("INSERT INTO audit_log (event) VALUES (?)", (f"Ticket {ticket_id} created",))
+    conn.commit()
+    return {"ticket_id": ticket_id, "status": status}
 
-# --- ELEKTROSICHERHEIT ---
-ELEKTRO_CHECKLISTE_BAUMONTAGE = [
-    {
-        "nr": "ES01",
-        "frage": "Sind alle Betriebsmittel/Anlagen nach DGUV V3, VDE auf der Baustelle geprüft & dokumentiert?",
-        "gesetz": "DGUV V3, BetrSichV, VDE 0105-100", "psa": ["Isolierhandschuhe", "Helm", "Arc-Kleidung"], "ki_help": "KI meldet Prüfungsfristen"
-    },
-    # ... weitere ES-Checks siehe vorherige Antworten ...
-]
+@app.get("/tickets")
+def list_tickets():
+    cursor.execute("SELECT id, description, status FROM tickets")
+    rows = cursor.fetchall()
+    tickets = []
+    for tid, desc_enc, status in rows:
+        try:
+            desc = decrypt(desc_enc)
+        except Exception:
+            desc = "(unencrypted) " + desc_enc
+        tickets.append({"id": tid, "description": desc, "status": status})
+    return {"tickets": tickets}
 
-@app.get("/api/elektro/checkliste")
-def elektro_checkliste():
-    return {"checkliste": ELEKTRO_CHECKLISTE_BAUMONTAGE}
+@app.put("/tickets/{ticket_id}")
+def update_ticket(ticket_id: int, status: str):
+    cursor.execute("UPDATE tickets SET status=? WHERE id=?", (status, ticket_id))
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    conn.commit()
+    cursor.execute("INSERT INTO audit_log (event) VALUES (?)", (f"Ticket {ticket_id} status changed to {status}",))
+    conn.commit()
+    return {"ticket_id": ticket_id, "new_status": status}
 
-@app.post("/api/elektro/risikoampel")
-def elektro_risikoampel(E: int, S: int, H: int = 1):
-    return {"risikoampel": nohl_risikoampel(E, S, H)}
+@app.post("/export/pdf")
+def export_to_pdf(data: ExportData):
+    from fpdf import FPDF
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    for line in data.lines:
+        pdf.cell(200, 10, txt=line, ln=True)
+    filename = "export.pdf"
+    pdf.output(filename)
+    return FileResponse(filename, media_type="application/pdf", filename=filename)
 
-# --- VDI-Checklisten ---
+@app.post("/export/word")
+def export_to_word(data: ExportData):
+    from docx import Document
+    doc = Document()
+    for line in data.lines:
+        doc.add_paragraph(line)
+    filename = "export.docx"
+    doc.save(filename)
+    return FileResponse(filename, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", filename=filename)
+
+# VDI-Checklisten, Elektro, Baustelle...
 VDI_CHECKLISTEN = [
     {"nr": "VDI6022-01", "thema": "Lüftungsanlagen Hygiene", "check": "Wurde Hygieneprüfung/nach VDI 6022 & ArbStättV durchgeführt?", "gesetz": "VDI 6022, ArbStättV", "ki_help": "KI prüft Termine, erinnert an Schulungen"},
     {"nr": "VDI3819-01", "thema": "Brandschutz Gebäudetechnik", "check": "Brandschutzklappen geprüft?", "gesetz": "VDI 3819, LandesbauO", "ki_help": "Prüfprotokoll automatisch anfordern"},
-    # ... weitere je nach VDI/Fachbereich ...
 ]
 
 @app.get("/api/vdi/checklisten")
 def get_vdi_checklisten():
     return {"vdi_checklisten": VDI_CHECKLISTEN}
 
-# --- EXTERNE SCHNITTSTELLEN | IMPORT ---
+# Externer Import/Upload/Integration
 EXTERNAL_UPLOAD_DIR = "/tmp/external_uploads"
 os.makedirs(EXTERNAL_UPLOAD_DIR, exist_ok=True)
 
@@ -182,6 +289,12 @@ async def import_external_file(
 async def external_webhook(system: str, event: str, data: dict):
     return {"status": "received", "system": system, "event": event, "data": data}
 
+@app.websocket("/ws/collaborate")
+async def collaborate_ws(websocket: WebSocket):
+    await websocket.accept()
+    await websocket.send_text("Collaboration session established.")
+    # Weiterer Ausbau für Live-Kollaboration möglich.
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8020, reload=True)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)), reload=True)
