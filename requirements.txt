@@ -4,6 +4,8 @@ python-multipart
 cryptography
 python-dotenv
 pydantic
+bcrypt
+pyjwt
 fpdf
 python-docx
 pdfplumber
