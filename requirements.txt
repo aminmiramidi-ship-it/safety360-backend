@@ -1,13 +1,5 @@
 fastapi
 uvicorn
 python-multipart
-pydantic
 cryptography
-fpdf
-python-docx
-pytesseract
-pdfplumber
-pdf2image
-pillow
-requests
-reportlab
+PyJWT
