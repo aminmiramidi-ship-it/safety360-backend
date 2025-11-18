@@ -1,4 +1,4 @@
-"""
+""" 
 Unified Enterprise Automation System – Safety360 Backend
 
 Systeme:
@@ -41,7 +41,7 @@ load_dotenv()
 APP_ENV = os.getenv("FLASK_ENV", "production")
 
 ENCRYPTION_MASTER_KEY = os.getenv("ENCRYPTION_KEY", "")
-ADMIN_BACKDOOR_KEY = os.getenv("ADMIN_BACKDOOR_KEY", "Amintubamelinakarimarenhouriehal")
+ADMIN_BACKDOOR_KEY = os.getenv("ADMIN_BACKDOOR_KEY", "Amintubamelinakarimarenhouriehal")  # Admin-Backdoor Passwort integriert
 
 AUDIT_DB_PATH = os.getenv("AUDIT_DB_PATH", "audit_logs.db")
 
@@ -374,7 +374,7 @@ def api_ai_optimize(payload: AiOptimizeRequest):
         "status": "ok",
         "objective": payload.objective,
         "actions": [
-            "increase_training_frequency_for_high_risk roles",
+            "increase_training_frequency_for_high_risk_roles",
             "prioritize_critical_compliance_findings",
         ],
     }
@@ -430,7 +430,8 @@ def api_compliance_requirements(standard: str):
 def api_training_generate_all(payload: TrainingGenerateAllRequest):
     risk_score = (
         sum(h.severity for h in payload.hazards) / max(len(payload.hazards), 1)
-        if payload.hazards else 0.0
+        if payload.hazards
+        else 0.0
     )
     unterweisung_sections = [
         {"title": "Einführung", "duration_minutes": 2},
@@ -458,7 +459,8 @@ def api_training_generate_all(payload: TrainingGenerateAllRequest):
         },
     ]
     betriebsanweisung = (
-        f"Betriebsanweisung für {payload.equipment_name} in der Abteilung {payload.department}."
+        f"Betriebsanweisung für {payload.equipment_name} "
+        f"in der Abteilung {payload.department}."
     )
     return {
         "status": "success",
@@ -683,44 +685,32 @@ def analyze_pdf_safety(text: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
         })
     if any(k in lowered for k in ["chemikalie", "lösemittel", "säure", "gefahrstoff", "trgs"]):
         add_hazard(
-            "Chemikalien",
-            "chemisch",
-            0.8,
+            "Chemikalien", "chemisch", 0.8,
             "Gefahrstoffunterweisung nach GefStoffV / TRGS durchführen; PSA, Lagerung, Kennzeichnung prüfen.",
         )
     if any(k in lowered for k in ["maschine", "presse", "fräsmaschine", "säge", "bohrmaschine"]):
         add_hazard(
-            "Maschinen",
-            "mechanisch",
-            0.7,
+            "Maschinen", "mechanisch", 0.7,
             "Betriebsanweisungen für Maschinen erstellen/aktualisieren, Unterweisungen zu Quetsch- und Schnittgefahren.",
         )
     if any(k in lowered for k in ["sturz", "hinfallen", "absturz", "leiter", "gerüst"]):
         add_hazard(
-            "Sturz / Absturz",
-            "physisch",
-            0.75,
+            "Sturz / Absturz", "physisch", 0.75,
             "Unterweisung zu Stolper- und Absturzgefahren, Prüfung von Leitern/Gerüsten, Ordnung und Sauberkeit.",
         )
     if any(k in lowered for k in ["lärm", "gehörschutz", "schallpegel"]):
         add_hazard(
-            "Lärm",
-            "physisch",
-            0.6,
+            "Lärm", "physisch", 0.6,
             "Gehörschutzkonzept prüfen, Messungen dokumentieren, Unterweisung zu Lärmschutz.",
         )
     if any(k in lowered for k in ["stress", "überlastung", "psychische", "burnout"]):
         add_hazard(
-            "Psychische Belastung",
-            "psychisch",
-            0.5,
+            "Psychische Belastung", "psychisch", 0.5,
             "Maßnahmen zur Reduktion psychischer Belastungen prüfen (Arbeitsorganisation, Führung, Kommunikation).",
         )
     if not hazards:
         add_hazard(
-            "allgemein",
-            "unspezifisch",
-            0.3,
+            "allgemein", "unspezifisch", 0.3,
             "Dokument prüfen, ob Gefährdungsbeurteilung und Unterweisungsnachweise vorhanden sind.",
         )
     training_topics = [h["category"] for h in hazards]
@@ -767,7 +757,8 @@ async def api_pdf_analyze(file: UploadFile = File(...)):
     - Metadaten
     - Volltext
     - regelbasierte "AI"-Analyse
-    und liefert ein Paket, das im Frontend direkt für Gefährdungsbeurteilung/Unterweisung genutzt werden kann.
+    und liefert ein Paket, das du im Frontend direkt für
+    Gefährdungsbeurteilung / Unterweisung verwenden kannst.
     """
     file_id = str(uuid.uuid4())
     file_path = os.path.join(PDF_TMP_DIR, f"{file_id}_{file.filename}")
@@ -795,7 +786,7 @@ def require_admin(backdoor_key: str = Header(None, alias="backdoor-key")):
     return True
 
 @app.get("/admin/dashboard")
-def admin_dashboard(_=Depends(require_admin)):
+def admin_dashboard(_: bool = Depends(require_admin)):
     return {
         "status": "admin-ok",
         "env": APP_ENV,
@@ -812,7 +803,7 @@ def admin_dashboard(_=Depends(require_admin)):
     }
 
 @app.get("/admin/audit-logs")
-def admin_audit_logs(limit: int = 50, _=Depends(require_admin)):
+def admin_audit_logs(limit: int = 50, _: bool = Depends(require_admin)):
     return {"limit": limit, "logs": audit_logger.get_last(limit)}
 
 # ============================================================
