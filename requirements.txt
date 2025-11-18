@@ -1,8 +1,13 @@
 fastapi
-uvicorn
+uvicorn[standard]
 python-dotenv
-pymupdf
-pdfplumber
+cryptography
+pydantic
+python-multipart
+PyMuPDF
+aiosqlite
+rich
+
 
 
 
