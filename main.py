@@ -1,12 +1,16 @@
 """
 Unified Enterprise Automation System
-6 Systeme, 1 FastAPI-App:
-- Smartsheet + n8n
+6+1 Systeme, 1 FastAPI-App:
+
+- Smartsheet + n8n (Stub)
 - AI / Self-Learning (Stub)
 - Compliance
 - Training Management
 - DSGVO / Encryption / Audit
 - Universal Multi-Sector
+- PDF Processing + "AI"-Analyse (regelbasiert, offline)
+
+Backend für Safety360 / Enterprise Automation.
 """
 
 import os
@@ -16,9 +20,8 @@ import sqlite3
 import datetime as dt
 from typing import List, Optional, Dict, Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -28,11 +31,11 @@ from cryptography.fernet import Fernet
 import base64
 
 from dotenv import load_dotenv
+import fitz  # PyMuPDF für PDF-Verarbeitung
 
-
-# -------------------------------------------------------------------
-# ENV & BASIS
-# -------------------------------------------------------------------
+# ============================================================
+#  ENV & BASIS
+# ============================================================
 load_dotenv()
 
 APP_ENV = os.getenv("FLASK_ENV", "production")
@@ -44,28 +47,29 @@ SMARTSHEET_SHEET_ID = os.getenv("SMARTSHEET_SHEET_ID", "")
 N8N_BASE_URL = os.getenv("N8N_BASE_URL", "")
 N8N_API_KEY = os.getenv("N8N_API_KEY", "")
 
+PDF_TMP_DIR = os.getenv("PDF_TMP_DIR", "/tmp/pdf_uploads")
+os.makedirs(PDF_TMP_DIR, exist_ok=True)
 
-# -------------------------------------------------------------------
-# FASTAPI APP
-# -------------------------------------------------------------------
+# ============================================================
+#  FASTAPI APP
+# ============================================================
 app = FastAPI(
     title="Unified Enterprise Automation System",
-    version="2.1.0",
-    description="6 Systeme • Smartsheet • AI • Compliance • Training • DSGVO • Universal",
+    version="2.2.0",
+    description="Smartsheet • AI • Compliance • Training • DSGVO • Universal • PDF AI Analyse",
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # bei Bedarf auf deine Domain einschränken
+    allow_origins=["*"],  # später ggf. auf Deine Domain begrenzen
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
-# -------------------------------------------------------------------
-# UTILS / ENCRYPTION
-# -------------------------------------------------------------------
+# ============================================================
+#  UTILS / ENCRYPTION
+# ============================================================
 def now_utc_iso() -> str:
     return dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
@@ -84,6 +88,8 @@ def _fernet_from_pbkdf2(master_key: bytes, salt: bytes) -> Fernet:
 
 
 class SimpleEncryptionManager:
+    """DSGVO-konforme Verschlüsselung (PBKDF2 + Fernet)."""
+
     def __init__(self, master_key: str) -> None:
         if not master_key or len(master_key) < 8:
             raise ValueError("ENCRYPTION_KEY ist zu kurz oder nicht gesetzt")
@@ -107,11 +113,12 @@ class SimpleEncryptionManager:
 
 encryption = SimpleEncryptionManager(ENCRYPTION_MASTER_KEY)
 
-
-# -------------------------------------------------------------------
-# AUDIT LOGGER (SQLite)
-# -------------------------------------------------------------------
+# ============================================================
+#  AUDIT LOGGER (SQLite)
+# ============================================================
 class AuditLogger:
+    """Audit-Log nach DSGVO Art. 30 mit SQLite."""
+
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
         self._init_db()
@@ -199,10 +206,9 @@ class AuditLogger:
 
 audit_logger = AuditLogger(AUDIT_DB_PATH)
 
-
-# -------------------------------------------------------------------
-# Pydantic MODELS
-# -------------------------------------------------------------------
+# ============================================================
+#  Pydantic MODELS
+# ============================================================
 class SmartsheetRow(BaseModel):
     data: Dict[str, Any] = Field(..., description="Spaltenname → Wert")
 
@@ -269,9 +275,9 @@ class UniversalRecommendationsRequest(BaseModel):
     num_employees: int
 
 
-# -------------------------------------------------------------------
-# API ENDPOINTS – SYSTEM 1: SMARTSHEET
-# -------------------------------------------------------------------
+# ============================================================
+#  SYSTEM 1: SMARTSHEET (Stub)
+# ============================================================
 @app.post("/api/smartsheet/create-row")
 def api_smartsheet_create_row(payload: SmartsheetRow):
     if not SMARTSHEET_TOKEN or not SMARTSHEET_SHEET_ID:
@@ -320,9 +326,9 @@ def api_smartsheet_update_row(payload: SmartsheetUpdateRow):
     return {"status": "ok", "row_id": payload.row_id, "updated": payload.data}
 
 
-# -------------------------------------------------------------------
-# SYSTEM 2: AI / SELF-LEARNING (Stubs)
-# -------------------------------------------------------------------
+# ============================================================
+#  SYSTEM 2: AI / SELF-LEARNING (Stubs)
+# ============================================================
 @app.get("/api/ai/insights")
 def api_ai_insights():
     return {
@@ -363,9 +369,9 @@ def api_ai_optimize(payload: AiOptimizeRequest):
     }
 
 
-# -------------------------------------------------------------------
-# SYSTEM 3: COMPLIANCE
-# -------------------------------------------------------------------
+# ============================================================
+#  SYSTEM 3: COMPLIANCE
+# ============================================================
 @app.get("/api/compliance/status")
 def api_compliance_status():
     return {
@@ -412,9 +418,9 @@ def api_compliance_requirements(standard: str):
     }
 
 
-# -------------------------------------------------------------------
-# SYSTEM 4: TRAINING MANAGEMENT
-# -------------------------------------------------------------------
+# ============================================================
+#  SYSTEM 4: TRAINING MANAGEMENT
+# ============================================================
 @app.post("/api/training/generate-all")
 def api_training_generate_all(payload: TrainingGenerateAllRequest):
     risk_score = (
@@ -502,9 +508,9 @@ def api_training_betriebsanweisung(payload: TrainingGenerateAllRequest):
     return {"betriebsanweisung": resp["package"]["betriebsanweisung"]}
 
 
-# -------------------------------------------------------------------
-# SYSTEM 5: DSGVO / ENCRYPTION / AUDIT
-# -------------------------------------------------------------------
+# ============================================================
+#  SYSTEM 5: DSGVO / ENCRYPTION / AUDIT
+# ============================================================
 @app.post("/api/dsgvo/encrypt")
 def api_dsgvo_encrypt(payload: DsgvoEncryptRequest):
     try:
@@ -562,9 +568,9 @@ def api_dsgvo_audit_trail(object_id: str):
     return {"object_id": object_id, "trail": audit_logger.get_trail(object_id)}
 
 
-# -------------------------------------------------------------------
-# SYSTEM 6: UNIVERSAL MULTI-SECTOR
-# -------------------------------------------------------------------
+# ============================================================
+#  SYSTEM 6: UNIVERSAL MULTI-SECTOR
+# ============================================================
 SUPPORTED_SECTORS = [
     "BAUGEWERBE",
     "HERSTELLUNG",
@@ -644,9 +650,201 @@ def api_universal_recommendations(payload: UniversalRecommendationsRequest):
     }
 
 
-# -------------------------------------------------------------------
-# HEALTH / STATUS
-# -------------------------------------------------------------------
+# ============================================================
+#  SYSTEM 7: PDF PROCESSING + "AI" ANALYSE
+# ============================================================
+def extract_pdf_metadata(file_path: str) -> Dict[str, Any]:
+    """Metadaten, Seitenanzahl und verwendete Fonts auslesen."""
+    try:
+        doc = fitz.open(file_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PDF konnte nicht geöffnet werden: {e}")
+
+    metadata = doc.metadata or {}
+    page_count = len(doc)
+
+    fonts = set()
+    for page in doc:
+        text_dict = page.get_text("dict")
+        for block in text_dict.get("blocks", []):
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    font_name = span.get("font")
+                    if font_name:
+                        fonts.add(font_name)
+
+    doc.close()
+
+    return {
+        "metadata": metadata,
+        "pages": page_count,
+        "fonts_used": sorted(list(fonts)),
+    }
+
+
+def extract_pdf_text(file_path: str) -> str:
+    """Reinen Text aus dem PDF extrahieren."""
+    try:
+        doc = fitz.open(file_path)
+        texts = [page.get_text() for page in doc]
+        doc.close()
+        return "\n".join(texts)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PDF Text konnte nicht extrahiert werden: {e}")
+
+
+def analyze_pdf_safety(text: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Einfache, regelbasierte "AI"-Analyse:
+    - Sucht nach Schlüsselwörtern zu Gefährdungen
+    - Leitet Trainings- und Unterweisungsempfehlungen ab
+    Läuft komplett offline, keine externen APIs.
+    """
+    lowered = text.lower()
+
+    hazards: List[Dict[str, Any]] = []
+
+    def add_hazard(keyword: str, category: str, severity: float, recommendation: str):
+        hazards.append(
+            {
+                "keyword": keyword,
+                "category": category,
+                "severity": severity,
+                "recommendation": recommendation,
+            }
+        )
+
+    # ein paar typische Gefährdungs-Trigger
+    if any(k in lowered for k in ["chemikalie", "lösemittel", "säure", "gefahrstoff", "trgs"]):
+        add_hazard(
+            "Chemikalien",
+            "chemisch",
+            0.8,
+            "Gefahrstoffunterweisung nach GefStoffV / TRGS durchführen; PSA, Lagerung, Kennzeichnung prüfen.",
+        )
+
+    if any(k in lowered for k in ["maschine", "presse", "fräsmaschine", "säge", "bohrmaschine"]):
+        add_hazard(
+            "Maschinen",
+            "mechanisch",
+            0.7,
+            "Betriebsanweisungen für Maschinen erstellen/aktualisieren, Unterweisungen zu Quetsch- und Schnittgefahren.",
+        )
+
+    if any(k in lowered for k in ["sturz", "hinfallen", "absturz", "leiter", "gerüst"]):
+        add_hazard(
+            "Sturz / Absturz",
+            "physisch",
+            0.75,
+            "Unterweisung zu Stolper- und Absturzgefahren, Prüfung von Leitern/Gerüsten, Ordnung und Sauberkeit.",
+        )
+
+    if any(k in lowered for k in ["lärm", "gehörschutz", "schallpegel"]):
+        add_hazard(
+            "Lärm",
+            "physisch",
+            0.6,
+            "Gehörschutzkonzept prüfen, Messungen dokumentieren, Unterweisung zu Lärmschutz.",
+        )
+
+    if any(k in lowered for k in ["stress", "überlastung", "psychische", "burnout"]):
+        add_hazard(
+            "Psychische Belastung",
+            "psychisch",
+            0.5,
+            "Maßnahmen zur Reduktion psychischer Belastungen prüfen (Arbeitsorganisation, Führung, Kommunikation).",
+        )
+
+    # Default, falls nichts gefunden
+    if not hazards:
+        hazards.append(
+            {
+                "keyword": "allgemein",
+                "category": "unspezifisch",
+                "severity": 0.3,
+                "recommendation": "Dokument prüfen, ob Gefährdungsbeurteilung und Unterweisungsnachweise vorhanden sind.",
+            }
+        )
+
+    training_topics = [h["category"] for h in hazards]
+    max_severity = max(h["severity"] for h in hazards) if hazards else 0.0
+
+    return {
+        "hazards_detected": hazards,
+        "max_severity": max_severity,
+        "suggested_training_topics": training_topics,
+        "metadata_title": metadata.get("title"),
+        "metadata_author": metadata.get("author"),
+    }
+
+
+@app.post("/api/pdf/metadata")
+async def api_pdf_metadata(file: UploadFile = File(...)):
+    file_id = str(uuid.uuid4())
+    file_path = os.path.join(PDF_TMP_DIR, f"{file_id}_{file.filename}")
+
+    with open(file_path, "wb") as f:
+        f.write(await file.read())
+
+    result = extract_pdf_metadata(file_path)
+
+    return {
+        "filename": file.filename,
+        "pages": result["pages"],
+        "metadata": result["metadata"],
+        "fonts_used": result["fonts_used"],
+    }
+
+
+@app.post("/api/pdf/text")
+async def api_pdf_text(file: UploadFile = File(...)):
+    file_id = str(uuid.uuid4())
+    file_path = os.path.join(PDF_TMP_DIR, f"{file_id}_{file.filename}")
+
+    with open(file_path, "wb") as f:
+        f.write(await file.read())
+
+    text = extract_pdf_text(file_path)
+
+    return {
+        "filename": file.filename,
+        "length": len(text),
+        "text": text,
+    }
+
+
+@app.post("/api/pdf/analyze")
+async def api_pdf_analyze(file: UploadFile = File(...)):
+    """
+    Kombiniert:
+    - Metadaten
+    - Volltext
+    - regelbasierte "AI"-Analyse
+    und liefert ein Paket, das du im Frontend direkt für
+    Gefährdungsbeurteilung / Unterweisung verwenden kannst.
+    """
+    file_id = str(uuid.uuid4())
+    file_path = os.path.join(PDF_TMP_DIR, f"{file_id}_{file.filename}")
+
+    with open(file_path, "wb") as f:
+        f.write(await file.read())
+
+    meta = extract_pdf_metadata(file_path)
+    text = extract_pdf_text(file_path)
+    analysis = analyze_pdf_safety(text, meta["metadata"])
+
+    return {
+        "filename": file.filename,
+        "pages": meta["pages"],
+        "metadata": meta["metadata"],
+        "fonts_used": meta["fonts_used"],
+        "analysis": analysis,
+    }
+
+
+# ============================================================
+#  HEALTH / STATUS
+# ============================================================
 @app.get("/api/health")
 def api_health():
     return {
@@ -659,6 +857,7 @@ def api_health():
             "training": "✅",
             "dsgvo": "✅",
             "universal": "✅",
+            "pdf": "✅",
         },
         "timestamp": now_utc_iso(),
     }
@@ -671,13 +870,13 @@ def root_status():
 
 @app.get("/api/status")
 def api_status():
-    # gleiche Info wie /status, nur unter /api
     return root_status()
 
 
-# -------------------------------------------------------------------
-# LOCAL DEV ENTRYPOINT (Render nutzt uvicorn main:app)
-# -------------------------------------------------------------------
+# ============================================================
+#  LOCAL DEV ENTRYPOINT
+#  (Render startet uvicorn main:app automatisch)
+# ============================================================
 if __name__ == "__main__":
     import uvicorn
 
