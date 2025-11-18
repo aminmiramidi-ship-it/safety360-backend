@@ -4,7 +4,7 @@ python-multipart
 cryptography
 python-dotenv
 pydantic
-bcrypt
+passlib[bcrypt]
 pyjwt
 fpdf
 python-docx
