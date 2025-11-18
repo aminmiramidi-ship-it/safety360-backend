@@ -3,14 +3,8 @@ uvicorn[standard]
 python-dotenv
 cryptography
 pydantic
+pydantic[email]
 python-multipart
 PyMuPDF
-aiosqlite
 rich
-
-
-
-
-
-
-
+aiosqlite
