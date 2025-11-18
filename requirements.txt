@@ -1,10 +1,28 @@
-fastapi
-uvicorn[standard]
-python-dotenv
-cryptography
-pydantic
-pydantic[email]
-python-multipart
-PyMuPDF
-rich
-aiosqlite
+fastapi==0.110.0
+uvicorn[standard]==0.29.0
+
+python-dotenv==1.0.1
+cryptography==41.0.7
+
+# OpenAI API
+openai==0.28.1
+
+# PDF & Word Export
+fpdf2==2.7.6
+python-docx==1.0.1
+
+# PDF text extraction
+pdfplumber==0.10.3
+
+# OCR Tools
+pytesseract==0.3.10
+Pillow==10.1.0
+pdf2image==1.17.0
+
+# For image processing
+pydantic==1.10.11
+
+# HTTP requests (for Smartsheet)
+requests==2.31.0
+
+
