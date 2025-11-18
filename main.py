@@ -1,15 +1,18 @@
 import os
 import sqlite3
 from typing import List, Optional
+from datetime import datetime, timedelta
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from cryptography.fernet import Fernet
+import bcrypt
+import jwt
 
 # -------------------------------------------------------
-# .env laden (lokal)
+# .env laden
 # -------------------------------------------------------
 try:
     from dotenv import load_dotenv
@@ -22,84 +25,121 @@ except ImportError:
 # -------------------------------------------------------
 app = FastAPI(title="Safety360 API", version="1.0")
 
-# Root Endpoint für Health-Checks und schnelle Prüfung
+
 @app.get("/")
 def root():
     return {"status": "ok", "message": "Safety360 Backend läuft"}
 
+
 # -------------------------------------------------------
-# Umgebungsvariablen
+# ENV Variablen
 # -------------------------------------------------------
 DB_URL = os.getenv("DATABASE_URL", "safety360.db")
-STRIPE_SECRET = os.getenv("STRIPE_SECRET_KEY")
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 SMARTSHEET_TOKEN = os.getenv("SMARTSHEET_TOKEN")
 SMARTSHEET_SHEET_ID = os.getenv("SMARTSHEET_SHEET_ID")
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+
+JWT_SECRET = os.getenv("JWT_SECRET", "supersecret123")
+JWT_ALGO = "HS256"
 
 # -------------------------------------------------------
 # Verschlüsselung
 # -------------------------------------------------------
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
 
-if not ENCRYPTION_KEY or len(ENCRYPTION_KEY) < 10:
+if not ENCRYPTION_KEY or len(str(ENCRYPTION_KEY)) < 10:
     new_key = Fernet.generate_key()
     ENCRYPTION_KEY = new_key
-    print(f"Generated ENCRYPTION_KEY: {new_key.decode()} (store securely)")
+    print("NEW ENCRYPTION KEY GENERATED:", new_key.decode())
 elif isinstance(ENCRYPTION_KEY, str):
     ENCRYPTION_KEY = ENCRYPTION_KEY.encode()
 
 fernet = Fernet(ENCRYPTION_KEY)
 
 
-def encrypt(data: str) -> str:
-    return fernet.encrypt(data.encode()).decode()
+def encrypt(x: str) -> str:
+    return fernet.encrypt(x.encode()).decode()
 
 
-def decrypt(token: str) -> str:
-    return fernet.decrypt(token.encode()).decode()
+def decrypt(x: str) -> str:
+    return fernet.decrypt(x.encode()).decode()
 
 
 # -------------------------------------------------------
-# PSA + Vorsorge
+# CORS
+# -------------------------------------------------------
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=True,
+)
+
+# -------------------------------------------------------
+# SQLite DB Init
+# -------------------------------------------------------
+conn = sqlite3.connect(DB_URL, check_same_thread=False)
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS tickets (
+    id INTEGER PRIMARY KEY,
+    description TEXT,
+    status TEXT
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY,
+    event TEXT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY,
+    email TEXT UNIQUE,
+    password_hash TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+""")
+
+conn.commit()
+
+# -------------------------------------------------------
+# PSA + HealthChecks
 # -------------------------------------------------------
 PSA_DATA = {
     "construction": {
         "working at heights": {
             "equipment": ["Safety harness", "Hard hat", "Lanyard"],
-            "regulations": ["DGUV Regel 112-198", "ArbSchG §5"],
+            "regulations": ["DGUV Regel 112-198", "ArbSchG §5"]
         },
         "noise intensive work": {
             "equipment": ["Ear protection", "Noise-cancelling helmet"],
-            "regulations": ["LärmVibrationsArbSchV", "DGUV Vorschrift 3"],
-        },
+            "regulations": ["LärmVibrationsArbSchV", "DGUV Vorschrift 3"]
+        }
     },
     "laboratory": {
         "chemical handling": {
             "equipment": ["Chemical-resistant gloves", "Safety goggles", "Lab coat"],
-            "regulations": ["GefStoffV", "TRGS 526"],
+            "regulations": ["GefStoffV", "TRGS 526"]
         }
-    },
+    }
 }
 
 HEALTH_CHECKS = {
     "construction": ["G41 (Working at Heights exam)", "G20 (Noise exposure exam)"],
-    "laboratory": ["G42 (Chemical exposure exam)", "G37 (Screen work exam)"],
+    "laboratory": ["G42 (Chemical exposure exam)", "G37 (Screen work exam)"]
 }
 
 translations = {
-    "en": {
-        "certificate_text": lambda hazard, num: (
-            f"Certificate: Risk assessment for hazard '{hazard}' completed. "
-            f"{num} measures recommended."
-        )
-    },
-    "de": {
-        "certificate_text": lambda hazard, num: (
-            f"Zertifikat: Gefährdungsbeurteilung für Gefahr '{hazard}' abgeschlossen. "
-            f"{num} Maßnahmen vorgeschlagen."
-        )
-    },
+    "en": {"certificate_text": lambda hazard, num: f"Certificate for '{hazard}' – {num} measures."},
+    "de": {"certificate_text": lambda hazard, num: f"Zertifikat für '{hazard}' – {num} Maßnahmen."},
 }
 
 # -------------------------------------------------------
@@ -114,284 +154,252 @@ class ExportData(BaseModel):
     lines: List[str]
 
 
-# -------------------------------------------------------
-# CORS
-# -------------------------------------------------------
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # bei Bedarf später einschränken
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+class AuthRegister(BaseModel):
+    email: str
+    password: str
+
+
+class AuthLogin(BaseModel):
+    email: str
+    password: str
+
 
 # -------------------------------------------------------
-# SQLite DB initialisieren
+# JWT
 # -------------------------------------------------------
-conn = sqlite3.connect(DB_URL, check_same_thread=False)
-cursor = conn.cursor()
+def create_jwt(user_id: int):
+    payload = {
+        "sub": user_id,
+        "exp": datetime.utcnow() + timedelta(hours=8)
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
 
-cursor.execute(
-    """
-CREATE TABLE IF NOT EXISTS tickets (
-    id INTEGER PRIMARY KEY,
-    description TEXT,
-    status TEXT
-)
-"""
-)
 
-cursor.execute(
-    """
-CREATE TABLE IF NOT EXISTS audit_log (
-    id INTEGER PRIMARY KEY,
-    event TEXT,
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-)
-"""
-)
+def decode_jwt(token: str):
+    try:
+        return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
+    except:
+        return None
 
-conn.commit()
 
 # -------------------------------------------------------
-# ENDPOINTS
+# AUTH - REGISTER
 # -------------------------------------------------------
+@app.post("/auth/register")
+def register_user(data: AuthRegister):
+    cursor.execute("SELECT id FROM users WHERE email=?", (data.email,))
+    if cursor.fetchone():
+        raise HTTPException(400, "User already exists")
 
-# PSA
+    pw_hash = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode()
+
+    cursor.execute(
+        "INSERT INTO users (email, password_hash) VALUES (?, ?)",
+        (data.email, pw_hash)
+    )
+    conn.commit()
+
+    return {"status": "ok", "message": "user created"}
+
+
+# -------------------------------------------------------
+# AUTH - LOGIN
+# -------------------------------------------------------
+@app.post("/auth/login")
+def login(data: AuthLogin):
+    cursor.execute("SELECT id, password_hash FROM users WHERE email=?", (data.email,))
+    u = cursor.fetchone()
+    if not u:
+        raise HTTPException(401, "Invalid credentials")
+
+    user_id, pw_hash = u
+
+    if not bcrypt.checkpw(data.password.encode(), pw_hash.encode()):
+        raise HTTPException(401, "Invalid credentials")
+
+    token = create_jwt(user_id)
+
+    return {"access_token": token, "token_type": "bearer"}
+
+
+# -------------------------------------------------------
+# AUTH - ME
+# -------------------------------------------------------
+@app.get("/auth/me")
+def auth_me(token: str):
+    payload = decode_jwt(token)
+    if not payload:
+        raise HTTPException(401, "Invalid token")
+
+    user_id = payload["sub"]
+
+    cursor.execute("SELECT id, email, created_at FROM users WHERE id=?", (user_id,))
+    u = cursor.fetchone()
+
+    return {"id": u[0], "email": u[1], "created_at": u[2]}
+
+
+# -------------------------------------------------------
+# PSA Endpoint
+# -------------------------------------------------------
 @app.get("/psa")
 def get_psa(industry: str, activity: str):
-    """
-    Empfiehlt PSA und Vorschriften für eine gegebene Branche und Tätigkeit.
-    Beispiel-Aufruf:
-    /psa?industry=construction&activity=working%20at%20heights
-    """
     ind = industry.lower()
     act = activity.lower()
     if ind in PSA_DATA and act in PSA_DATA[ind]:
-        data = PSA_DATA[ind][act]
-        return {
-            "industry": ind,
-            "activity": act,
-            "equipment": data["equipment"],
-            "regulations": data["regulations"],
-        }
-    raise HTTPException(status_code=404, detail="No PSA data found.")
+        return PSA_DATA[ind][act]
+    raise HTTPException(404, "No PSA data")
 
 
-# Health Checks
+# -------------------------------------------------------
+# Healthchecks
+# -------------------------------------------------------
 @app.get("/health-checks")
 def get_health_checks(industry: str):
-    """
-    Listet erforderliche Vorsorgeuntersuchungen für eine Branche auf.
-    Beispiel:
-    /health-checks?industry=construction
-    """
     ind = industry.lower()
     if ind in HEALTH_CHECKS:
         return {"industry": ind, "required_examinations": HEALTH_CHECKS[ind]}
-    raise HTTPException(status_code=404, detail="No health check data found.")
+    raise HTTPException(404, "No health check data")
 
 
+# -------------------------------------------------------
 # Risk Assessment
+# -------------------------------------------------------
 @app.post("/riskassessment")
-def create_risk_assessment(hazard: str, use_ai: bool = True, lang: str = "de"):
-    """
-    Erstellt eine Gefährdungsbeurteilung für die angegebene Gefahr.
-    Optional mit KI (OpenAI), sonst Fallback basierend auf PSA_DATA.
-    """
-    measures: List[str] = []
+def create_risk_assessment(hazard: str, lang: str = "de"):
+    measures = []
 
-    if use_ai and OPENAI_KEY:
-        import openai
-
-        openai.api_key = OPENAI_KEY
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "user", "content": f"Suggest safety measures for: {hazard}"}
-            ],
-        )
-        suggestion_text = response.choices[0].message.content
-        measures = [m.strip() for m in suggestion_text.split("\n") if m.strip()]
-    else:
-        for ind, acts in PSA_DATA.items():
-            for act, data in acts.items():
-                if act in hazard.lower():
-                    measures.extend([f"Use {eq}" for eq in data["equipment"]])
+    for ind, acts in PSA_DATA.items():
+        for act, data in acts.items():
+            if act in hazard.lower():
+                measures.extend([f"Use {x}" for x in data["equipment"]])
 
     if lang not in translations:
         lang = "de"
 
-    cert_text = translations[lang]["certificate_text"](hazard, len(measures))
+    cert = translations[lang]["certificate_text"](hazard, len(measures))
 
-    return {"hazard": hazard, "measures": measures, "certificate_text": cert_text}
+    return {"hazard": hazard, "measures": measures, "certificate_text": cert}
 
 
+# -------------------------------------------------------
 # Tickets
+# -------------------------------------------------------
 @app.post("/tickets")
 def create_ticket(ticket: TicketCreate):
-    """Erstellt ein neues Ticket und loggt es im Audit-Log."""
     desc_enc = encrypt(ticket.description)
-    status = ticket.status or "open"
-    cursor.execute(
-        "INSERT INTO tickets (description, status) VALUES (?, ?)",
-        (desc_enc, status),
-    )
+    cursor.execute("INSERT INTO tickets (description, status) VALUES (?, ?)", (desc_enc, ticket.status))
     conn.commit()
-    ticket_id = cursor.lastrowid
-    cursor.execute(
-        "INSERT INTO audit_log (event) VALUES (?)",
-        (f"Ticket {ticket_id} created",),
-    )
+    tid = cursor.lastrowid
+
+    cursor.execute("INSERT INTO audit_log (event) VALUES (?)", (f"Ticket {tid} created",))
     conn.commit()
-    return {"ticket_id": ticket_id, "status": status}
+
+    return {"ticket_id": tid}
 
 
 @app.get("/tickets")
 def list_tickets():
-    """Listet alle Tickets mit entschlüsselter Beschreibung."""
     cursor.execute("SELECT id, description, status FROM tickets")
     rows = cursor.fetchall()
-    result = []
-    for tid, desc_enc, status in rows:
+
+    out = []
+    for tid, enc, st in rows:
         try:
-            desc = decrypt(desc_enc)
-        except Exception:
-            desc = "(unencrypted) " + desc_enc
-        result.append({"id": tid, "description": desc, "status": status})
-    return {"tickets": result}
+            desc = decrypt(enc)
+        except:
+            desc = "(unencrypted) " + enc
+        out.append({"id": tid, "description": desc, "status": st})
+
+    return {"tickets": out}
 
 
-@app.put("/tickets/{ticket_id}")
-def update_ticket(ticket_id: int, status: str):
-    """Aktualisiert den Status eines Tickets."""
-    cursor.execute("UPDATE tickets SET status=? WHERE id=?", (status, ticket_id))
-    if cursor.rowcount == 0:
-        raise HTTPException(status_code=404, detail="Ticket not found")
-    conn.commit()
-    cursor.execute(
-        "INSERT INTO audit_log (event) VALUES (?)",
-        (f"Ticket {ticket_id} status changed to {status}",),
-    )
-    conn.commit()
-    return {"ticket_id": ticket_id, "new_status": status}
-
-
-# PDF Export
+# -------------------------------------------------------
+# Export PDF
+# -------------------------------------------------------
 @app.post("/export/pdf")
-def export_to_pdf(data: ExportData):
-    """Erstellt eine einfache PDF-Datei aus Textzeilen."""
+def export_pdf(data: ExportData):
     from fpdf import FPDF
 
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
+
     for line in data.lines:
         pdf.cell(200, 10, txt=line, ln=True)
-    filename = "export.pdf"
-    pdf.output(filename)
-    return FileResponse(
-        filename, media_type="application/pdf", filename=filename
-    )
+
+    fname = "export.pdf"
+    pdf.output(fname)
+    return FileResponse(fname)
 
 
-# Word Export
+# -------------------------------------------------------
+# Export Word
+# -------------------------------------------------------
 @app.post("/export/word")
-def export_to_word(data: ExportData):
-    """Erstellt ein Word-Dokument aus Textzeilen."""
+def export_word(data: ExportData):
     from docx import Document
 
     doc = Document()
     for line in data.lines:
         doc.add_paragraph(line)
-    filename = "export.docx"
-    doc.save(filename)
-    return FileResponse(
-        filename,
-        media_type=(
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        ),
-        filename=filename,
-    )
+
+    fname = "export.docx"
+    doc.save(fname)
+    return FileResponse(fname)
 
 
-# Smartsheet Export
-@app.post("/export/smartsheet")
-def export_to_smartsheet(sheet_data: dict):
-    """Überträgt Daten an ein konfiguriertes Smartsheet."""
-    if not SMARTSHEET_TOKEN or not SMARTSHEET_SHEET_ID:
-        raise HTTPException(
-            status_code=500, detail="Smartsheet integration not configured."
-        )
-
-    import requests
-
-    url = f"https://api.smartsheet.com/2.0/sheets/{SMARTSHEET_SHEET_ID}/rows"
-    headers = {"Authorization": f"Bearer {SMARTSHEET_TOKEN}"}
-    response = requests.post(url, headers=headers, json=sheet_data)
-
-    if response.status_code >= 400:
-        raise HTTPException(status_code=response.status_code, detail=response.text)
-
-    return {"status": "success"}
-
-
-# Import / PDF-Text (ohne schwere OCR-Abhängigkeiten)
+# -------------------------------------------------------
+# PDF Import
+# -------------------------------------------------------
 @app.post("/import")
 async def import_data(file: UploadFile = File(...)):
-    """
-    Liest Text aus einer PDF-Datei aus (Text-PDF).
-    Kein OCR für Scan-PDFs in dieser Render-kompatiblen Version.
-    """
+    import pdfplumber
     import io
 
     data = await file.read()
 
-    if file.content_type != "application/pdf":
-        raise HTTPException(
-            status_code=400, detail="Bitte eine PDF-Datei (Text-PDF) hochladen."
-        )
+    text = ""
+    with pdfplumber.open(io.BytesIO(data)) as pdf:
+        for page in pdf.pages:
+            text += page.extract_text() or ""
 
-    try:
-        import pdfplumber
-
-        text = ""
-        with pdfplumber.open(io.BytesIO(data)) as pdf:
-            for page in pdf.pages:
-                text += page.extract_text() or ""
-        return {"extracted_text": text}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"PDF extraction failed: {e}")
+    return {"extracted_text": text}
 
 
-# Admin Endpoints
+# -------------------------------------------------------
+# Admin
+# -------------------------------------------------------
 @app.get("/admin/inspect-db")
-def admin_inspect_db(token: str):
-    """Listet Tabellen der Datenbank (Admin)."""
-    if token != ADMIN_TOKEN or not ADMIN_TOKEN:
-        raise HTTPException(status_code=403, detail="Forbidden")
+def admin_db(token: str):
+    if token != ADMIN_TOKEN:
+        raise HTTPException(403, "Forbidden")
+
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    return {"tables": [row[0] for row in cursor.fetchall()]}
+    return {"tables": [x[0] for x in cursor.fetchall()]}
 
 
 @app.get("/admin/audit-log")
-def get_audit_log(token: str):
-    """Gibt Audit-Log-Einträge zurück (Admin)."""
-    if token != ADMIN_TOKEN or not ADMIN_TOKEN:
-        raise HTTPException(status_code=403, detail="Forbidden")
+def admin_logs(token: str):
+    if token != ADMIN_TOKEN:
+        raise HTTPException(403, "Forbidden")
+
     cursor.execute("SELECT timestamp, event FROM audit_log ORDER BY timestamp DESC")
-    return {"audit_log": [{"timestamp": ts, "event": ev} for ts, ev in cursor.fetchall()]}
+    return {"audit": [{"timestamp": ts, "event": ev} for ts, ev in cursor.fetchall()]}
 
 
+# -------------------------------------------------------
 # WebSocket
+# -------------------------------------------------------
 @app.websocket("/ws/collaborate")
-async def collaborate_ws(websocket: WebSocket):
+async def ws(websocket: WebSocket):
     await websocket.accept()
-    await websocket.send_text("Collaboration session established.")
+    await websocket.send_text("WebSocket OK")
 
 
-# Lokaler Start
+# -------------------------------------------------------
+# Local run
+# -------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
