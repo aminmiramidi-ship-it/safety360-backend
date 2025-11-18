@@ -42,7 +42,7 @@ def decrypt(token: str) -> str:
     return fernet.decrypt(token.encode()).decode()
 
 # -------------------------------------------------------
-# Datenbank
+# DATABASE
 # -------------------------------------------------------
 def get_db():
     conn = sqlite3.connect(DB_URL)
@@ -52,24 +52,17 @@ def get_db():
 # -------------------------------------------------------
 # PSA
 # -------------------------------------------------------
-class PsaRequest(BaseModel):
-    industry: str
-    activity: str
-    equipment: List[str]
-    regulations: List[str]
-
 @app.get("/psa")
 def get_psa(industry: str, activity: str):
-    data = {
+    return {
         "industry": industry,
         "activity": activity,
-        "equipment": ["Safety harness", "Gloves", "Helmet"],
+        "equipment": ["Safety harness", "Helmet", "Gloves"],
         "regulations": ["DGUV 112-198", "ArbSchG §5"]
     }
-    return data
 
 # -------------------------------------------------------
-# HEALTH CHECKS
+# HEALTH EXAMS
 # -------------------------------------------------------
 @app.get("/health-checks")
 def get_health(industry: str):
@@ -165,7 +158,8 @@ def import_data(file: UploadFile = File(...)):
 @app.get("/admin/inspect-db")
 def admin_inspect(token: str):
     if token != ADMIN_TOKEN:
-        raise HTTPException(401, "Unauthorized")
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
     conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
@@ -174,5 +168,6 @@ def admin_inspect(token: str):
 @app.get("/admin/audit-log")
 def admin_audit(token: str):
     if token != ADMIN_TOKEN:
-        raise HTTPException(401, "Unauthorized")
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
     return {"log": ["system ok", "no issues detected"]}
