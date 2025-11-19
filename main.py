@@ -1,310 +1,316 @@
 import os
 import sqlite3
-from typing import List
-from datetime import datetime, timedelta
-import hashlib
-import base64
-import jwt
+from typing import List, Optional
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Depends
+from fastapi import FastAPI, HTTPException, UploadFile, File, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from cryptography.fernet import Fernet
 
-# -----------------------------------------------------------
-# ENV laden
-# -----------------------------------------------------------
+# -------------------------------------------------------
+# .env laden (lokal)
+# -------------------------------------------------------
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
     pass
 
-JWT_SECRET = os.getenv("JWT_SECRET", "change_me")
-JWT_ALG = "HS256"
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "admin123")
-DB_URL = os.getenv("DATABASE_URL", "safety360.db")
+# -------------------------------------------------------
+# FastAPI App
+# -------------------------------------------------------
+app = FastAPI(title="Safety360 API", version="1.0")
 
-# -----------------------------------------------------------
-# App
-# -----------------------------------------------------------
-app = FastAPI(title="Safety360 API")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
+# Root Endpoint für Render Health Checks
 @app.get("/")
 def root():
     return {"status": "ok", "message": "Safety360 Backend läuft"}
 
-# -----------------------------------------------------------
-# Encryption
-# -----------------------------------------------------------
+# -------------------------------------------------------
+# Umgebungsvariablen
+# -------------------------------------------------------
+DB_URL = os.getenv("DATABASE_URL", "safety360.db")
+STRIPE_SECRET = os.getenv("STRIPE_SECRET_KEY")
+OPENAI_KEY = os.getenv("OPENAI_API_KEY")
+SMARTSHEET_TOKEN = os.getenv("SMARTSHEET_TOKEN")
+SMARTSHEET_SHEET_ID = os.getenv("SMARTSHEET_SHEET_ID")
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+
+# -------------------------------------------------------
+# Verschlüsselung
+# -------------------------------------------------------
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
+
 if not ENCRYPTION_KEY or len(ENCRYPTION_KEY) < 10:
-    ENCRYPTION_KEY = Fernet.generate_key()
-    print("Generated ENCRYPTION_KEY:", ENCRYPTION_KEY.decode())
+    new_key = Fernet.generate_key()
+    ENCRYPTION_KEY = new_key
+    print(f"Generated ENCRYPTION_KEY: {new_key.decode()} (store securely)")
 elif isinstance(ENCRYPTION_KEY, str):
     ENCRYPTION_KEY = ENCRYPTION_KEY.encode()
 
 fernet = Fernet(ENCRYPTION_KEY)
 
-def encrypt(text: str) -> str:
-    return fernet.encrypt(text.encode()).decode()
+def encrypt(data: str) -> str:
+    return fernet.encrypt(data.encode()).decode()
 
 def decrypt(token: str) -> str:
     return fernet.decrypt(token.encode()).decode()
 
-# -----------------------------------------------------------
-# DB
-# -----------------------------------------------------------
-def db():
-    conn = sqlite3.connect(DB_URL)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def init_db():
-    conn = db()
-    cur = conn.cursor()
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY,
-            email TEXT UNIQUE,
-            password_hash TEXT,
-            salt TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS tickets (
-            id INTEGER PRIMARY KEY,
-            title TEXT,
-            description TEXT,
-            status TEXT
-        )
-    """)
-
-    conn.commit()
-    conn.close()
-
-init_db()
-
-# -----------------------------------------------------------
-# JWT / Passwort
-# -----------------------------------------------------------
-security = HTTPBearer()
-
-def hash_pw(password: str, salt: str) -> str:
-    h = hashlib.sha256()
-    h.update(salt.encode() + password.encode())
-    return h.hexdigest()
-
-def verify_pw(password: str, salt: str, pw_hash: str) -> bool:
-    return hash_pw(password, salt) == pw_hash
-
-def create_token(user_id: int) -> str:
-    payload = {
-        "sub": user_id,
-        "exp": datetime.utcnow() + timedelta(hours=8)
+# -------------------------------------------------------
+# PSA + Vorsorge
+# -------------------------------------------------------
+PSA_DATA = {
+    "construction": {
+        "working at heights": {
+            "equipment": ["Safety harness", "Hard hat", "Lanyard"],
+            "regulations": ["DGUV Regel 112-198", "ArbSchG §5"]
+        },
+        "noise intensive work": {
+            "equipment": ["Ear protection", "Noise-cancelling helmet"],
+            "regulations": ["LärmVibrationsArbSchV", "DGUV Vorschrift 3"]
+        }
+    },
+    "laboratory": {
+        "chemical handling": {
+            "equipment": ["Chemical-resistant gloves", "Safety goggles", "Lab coat"],
+            "regulations": ["GefStoffV", "TRGS 526"]
+        }
     }
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
+}
 
-def require_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> int:
-    token = credentials.credentials
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
-        return int(payload["sub"])
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+HEALTH_CHECKS = {
+    "construction": ["G41 (Working at Heights exam)", "G20 (Noise exposure exam)"],
+    "laboratory": ["G42 (Chemical exposure exam)", "G37 (Screen work exam)"]
+}
 
-# -----------------------------------------------------------
+translations = {
+    "en": {
+        "certificate_text": lambda hazard, num:
+            f"Certificate: Risk assessment for hazard '{hazard}' completed. {num} measures recommended."
+    },
+    "de": {
+        "certificate_text": lambda hazard, num:
+            f"Zertifikat: Gefährdungsbeurteilung für Gefahr '{hazard}' abgeschlossen. {num} Maßnahmen vorgeschlagen."
+    }
+}
+
+# -------------------------------------------------------
 # Models
-# -----------------------------------------------------------
-class RegisterBody(BaseModel):
-    email: str
-    password: str
-
-class LoginBody(BaseModel):
-    email: str
-    password: str
-
-class Ticket(BaseModel):
-    title: str
+# -------------------------------------------------------
+class TicketCreate(BaseModel):
     description: str
-    status: str = "open"
+    status: Optional[str] = "open"
 
-class RiskAssessment(BaseModel):
-    industry: str
-    hazards: List[str]
-    measures: List[str]
+class ExportData(BaseModel):
+    lines: List[str]
 
-# -----------------------------------------------------------
-# AUTH
-# -----------------------------------------------------------
-@app.post("/auth/register")
-def register(body: RegisterBody):
-    conn = db()
-    cur = conn.cursor()
+# -------------------------------------------------------
+# CORS
+# -------------------------------------------------------
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-    cur.execute("SELECT id FROM users WHERE email=?", (body.email,))
-    if cur.fetchone():
-        conn.close()
-        raise HTTPException(400, "User exists")
+# -------------------------------------------------------
+# SQLite DB initialisieren
+# -------------------------------------------------------
+conn = sqlite3.connect(DB_URL, check_same_thread=False)
+cursor = conn.cursor()
 
-    salt = base64.b64encode(os.urandom(16)).decode()
-    pw_hash = hash_pw(body.password, salt)
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS tickets (
+    id INTEGER PRIMARY KEY,
+    description TEXT,
+    status TEXT
+)
+""")
 
-    cur.execute(
-        "INSERT INTO users (email, password_hash, salt) VALUES (?, ?, ?)",
-        (body.email, pw_hash, salt)
-    )
-    conn.commit()
-    conn.close()
-    return {"status": "ok"}
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY,
+    event TEXT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+""")
 
-@app.post("/auth/login")
-def login(body: LoginBody):
-    conn = db()
-    cur = conn.cursor()
+conn.commit()
 
-    cur.execute("SELECT id, password_hash, salt FROM users WHERE email=?", (body.email,))
-    row = cur.fetchone()
-    conn.close()
+# -------------------------------------------------------
+# ENDPOINTS
+# -------------------------------------------------------
 
-    if not row:
-        raise HTTPException(401, "Invalid credentials")
-
-    if not verify_pw(body.password, row["salt"], row["password_hash"]):
-        raise HTTPException(401, "Invalid credentials")
-
-    return {"access_token": create_token(row["id"]), "token_type": "bearer"}
-
-@app.get("/auth/me")
-def me(user_id: int = Depends(require_user)):
-    conn = db()
-    cur = conn.cursor()
-    cur.execute("SELECT id, email, created_at FROM users WHERE id=?", (user_id,))
-    row = cur.fetchone()
-    conn.close()
-    if not row:
-        raise HTTPException(404, "User not found")
-    return dict(row)
-
-# -----------------------------------------------------------
-# PSA (öffentlich)
-# -----------------------------------------------------------
 @app.get("/psa")
-def psa(industry: str, activity: str):
-    return {
-        "industry": industry,
-        "activity": activity,
-        "equipment": ["Safety harness", "Helmet", "Gloves"],
-        "regulations": ["DGUV 112-198", "ArbSchG §5"]
-    }
+def get_psa(industry: str, activity: str):
+    ind = industry.lower()
+    act = activity.lower()
+    if ind in PSA_DATA and act in PSA_DATA[ind]:
+        return {
+            "industry": ind,
+            "activity": act,
+            "equipment": PSA_DATA[ind][act]["equipment"],
+            "regulations": PSA_DATA[ind][act]["regulations"]
+        }
+    raise HTTPException(status_code=404, detail="No PSA data found.")
 
-# -----------------------------------------------------------
-# Health Checks (öffentlich)
-# -----------------------------------------------------------
 @app.get("/health-checks")
-def health(industry: str):
-    return {
-        "industry": industry,
-        "required_examinations": ["G41 (Working at Heights)", "G20 (Noise Exposure)"]
-    }
+def get_health_checks(industry: str):
+    ind = industry.lower()
+    if ind in HEALTH_CHECKS:
+        return {"industry": ind, "required_examinations": HEALTH_CHECKS[ind]}
+    raise HTTPException(status_code=404, detail="No health check data found.")
 
-# -----------------------------------------------------------
-# Risk Assessment (geschützt)
-# -----------------------------------------------------------
 @app.post("/riskassessment")
-def risk_create(body: RiskAssessment, user_id: int = Depends(require_user)):
-    return {"saved": True, "user_id": user_id, "data": body.dict()}
+def create_risk_assessment(hazard: str, use_ai: bool = True, lang: str = "de"):
+    measures: List[str] = []
 
-# -----------------------------------------------------------
-# Tickets (geschützt)
-# -----------------------------------------------------------
-@app.get("/tickets")
-def ticket_list(user_id: int = Depends(require_user)):
-    conn = db()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM tickets")
-    rows = [dict(r) for r in cur.fetchall()]
-    conn.close()
-    return rows
+    if use_ai and OPENAI_KEY:
+        import openai
+        openai.api_key = OPENAI_KEY
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": f"Suggest safety measures for: {hazard}"}]
+        )
+        suggestion_text = response.choices[0].message.content
+        measures = [m.strip() for m in suggestion_text.split("\n") if m.strip()]
+    else:
+        for ind, acts in PSA_DATA.items():
+            for act, data in acts.items():
+                if act in hazard.lower():
+                    measures.extend([f"Use {eq}" for eq in data["equipment"]])
+
+    if lang not in translations:
+        lang = "de"
+
+    cert_text = translations[lang]["certificate_text"](hazard, len(measures))
+
+    return {"hazard": hazard, "measures": measures, "certificate_text": cert_text}
 
 @app.post("/tickets")
-def ticket_create(ticket: Ticket, user_id: int = Depends(require_user)):
-    conn = db()
-    cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO tickets (title, description, status) VALUES (?, ?, ?)",
-        (ticket.title, ticket.description, ticket.status)
-    )
+def create_ticket(ticket: TicketCreate):
+    desc_enc = encrypt(ticket.description)
+    status = ticket.status or "open"
+    cursor.execute("INSERT INTO tickets (description, status) VALUES (?, ?)", (desc_enc, status))
     conn.commit()
-    conn.close()
-    return {"status": "created"}
+    ticket_id = cursor.lastrowid
+    cursor.execute("INSERT INTO audit_log (event) VALUES (?)", (f"Ticket {ticket_id} created",))
+    conn.commit()
+    return {"ticket_id": ticket_id, "status": status}
+
+@app.get("/tickets")
+def list_tickets():
+    cursor.execute("SELECT id, description, status FROM tickets")
+    rows = cursor.fetchall()
+    result = []
+    for tid, desc_enc, status in rows:
+        try:
+            desc = decrypt(desc_enc)
+        except:
+            desc = "(unencrypted) " + desc_enc
+        result.append({"id": tid, "description": desc, "status": status})
+    return {"tickets": result}
 
 @app.put("/tickets/{ticket_id}")
-def ticket_update(ticket_id: int, ticket: Ticket, user_id: int = Depends(require_user)):
-    conn = db()
-    cur = conn.cursor()
-    cur.execute(
-        "UPDATE tickets SET title=?, description=?, status=? WHERE id=?",
-        (ticket.title, ticket.description, ticket.status, ticket_id)
-    )
+def update_ticket(ticket_id: int, status: str):
+    cursor.execute("UPDATE tickets SET status=? WHERE id=?", (status, ticket_id))
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Ticket not found")
     conn.commit()
-    conn.close()
-    return {"status": "updated"}
+    cursor.execute("INSERT INTO audit_log (event) VALUES (?)", (f"Ticket {ticket_id} status changed to {status}",))
+    conn.commit()
+    return {"ticket_id": ticket_id, "new_status": status}
 
-# -----------------------------------------------------------
-# Export (geschützt)
-# -----------------------------------------------------------
 @app.post("/export/pdf")
-def export_pdf(text: str, user_id: int = Depends(require_user)):
+def export_to_pdf(data: ExportData):
+    from fpdf import FPDF
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    for line in data.lines:
+        pdf.cell(200, 10, txt=line, ln=True)
     filename = "export.pdf"
-    with open(filename, "w") as f:
-        f.write(text)
-    return FileResponse(filename, media_type="application/pdf")
+    pdf.output(filename)
+    return FileResponse(filename, media_type="application/pdf", filename=filename)
 
 @app.post("/export/word")
-def export_word(text: str, user_id: int = Depends(require_user)):
+def export_to_word(data: ExportData):
+    from docx import Document
+    doc = Document()
+    for line in data.lines:
+        doc.add_paragraph(line)
     filename = "export.docx"
-    with open(filename, "w") as f:
-        f.write(text)
-    return FileResponse(filename)
+    doc.save(filename)
+    return FileResponse(filename, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", filename=filename)
 
-# -----------------------------------------------------------
-# Import (geschützt)
-# -----------------------------------------------------------
+@app.post("/export/smartsheet")
+def export_to_smartsheet(sheet_data: dict):
+    if not SMARTSHEET_TOKEN or not SMARTSHEET_SHEET_ID:
+        raise HTTPException(status_code=500, detail="Smartsheet integration not configured.")
+
+    import requests
+    url = f"https://api.smartsheet.com/2.0/sheets/{SMARTSHEET_SHEET_ID}/rows"
+    headers = {"Authorization": f"Bearer {SMARTSHEET_TOKEN}"}
+    response = requests.post(url, headers=headers, json=sheet_data)
+
+    if response.status_code >= 400:
+        raise HTTPException(status_code=response.status_code, detail=response.text)
+
+    return {"status": "success"}
+
+# -------------------------------------------------------
+# WICHTIG: OCR komplett entfernt (Render-kompatible Version)
+# -------------------------------------------------------
 @app.post("/import")
-def import_data(file: UploadFile = File(...), user_id: int = Depends(require_user)):
-    content = file.file.read().decode()
-    return {"imported": True, "length": len(content)}
+async def import_data(file: UploadFile = File(...)):
+    """Nur Text-PDFs werden unterstützt. OCR nicht verfügbar."""
+    import io
+    data = await file.read()
 
-# -----------------------------------------------------------
+    if file.content_type != "application/pdf":
+        raise HTTPException(status_code=400, detail="Bitte eine PDF-Datei hochladen.")
+
+    try:
+        import pdfplumber
+        text = ""
+        with pdfplumber.open(io.BytesIO(data)) as pdf:
+            for page in pdf.pages:
+                text += page.extract_text() or ""
+        return {"extracted_text": text}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PDF extraction failed: {e}")
+
+# -------------------------------------------------------
 # Admin
-# -----------------------------------------------------------
+# -------------------------------------------------------
 @app.get("/admin/inspect-db")
-def admin_db(token: str):
-    if token != ADMIN_TOKEN:
-        raise HTTPException(401, "Unauthorized")
-
-    conn = db()
-    cur = conn.cursor()
-    cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    rows = [r[0] for r in cur.fetchall()]
-    conn.close()
-    return rows
+def admin_inspect_db(token: str):
+    if token != ADMIN_TOKEN or not ADMIN_TOKEN:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    return {"tables": [row[0] for row in cursor.fetchall()]}
 
 @app.get("/admin/audit-log")
-def admin_log(token: str):
-    if token != ADMIN_TOKEN:
-        raise HTTPException(401, "Unauthorized")
-    return ["system ok", "no issues"]
+def get_audit_log(token: str):
+    if token != ADMIN_TOKEN or not ADMIN_TOKEN:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    cursor.execute("SELECT timestamp, event FROM audit_log ORDER BY timestamp DESC")
+    return {"audit_log": [{"timestamp": ts, "event": ev} for ts, ev in cursor.fetchall()]}
+
+# -------------------------------------------------------
+# WebSocket
+# -------------------------------------------------------
+@app.websocket("/ws/collaborate")
+async def collaborate_ws(websocket: WebSocket):
+    await websocket.accept()
+    await websocket.send_text("Collaboration session established.")
+
+# -------------------------------------------------------
+# Lokaler Start
+# -------------------------------------------------------
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
