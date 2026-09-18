@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from auth import get_current_user
 from auth import router as auth_router
 from database import Base, engine, get_db
+from documents import router as document_router
 from models import AuditLog, Ticket, User
 from schemas import (
     DashboardResponse,
@@ -26,7 +27,7 @@ from schemas import (
 )
 from tenants import router as tenant_router
 
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 ENVIRONMENT = os.getenv("SAFETY360_ENV", "development").lower()
 MAX_IMPORT_BYTES = int(os.getenv("MAX_IMPORT_BYTES", str(20 * 1024 * 1024)))
 
@@ -84,6 +85,7 @@ app.add_middleware(
 
 app.include_router(auth_router, prefix="/auth", tags=["Auth"])
 app.include_router(tenant_router, prefix="/tenants", tags=["Tenants"])
+app.include_router(document_router, prefix="/documents", tags=["Document Control"])
 
 
 @app.get("/", tags=["System"])
