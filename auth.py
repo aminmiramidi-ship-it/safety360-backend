@@ -1,6 +1,7 @@
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
+from typing import Annotated
 
 import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -32,6 +33,12 @@ if not SECRET_KEY:
         "Für diese Development-Session wurde ein temporärer Schlüssel erzeugt."
     )
 
+DBSession = Annotated[Session, Depends(get_db)]
+BearerCredentials = Annotated[
+    HTTPAuthorizationCredentials | None,
+    Depends(security),
+]
+
 
 def _password_bytes(password: str) -> bytes:
     encoded = password.encode("utf-8")
@@ -49,7 +56,10 @@ def hash_password(password: str) -> str:
 
 def verify_password(plain_password: str, password_hash: str) -> bool:
     try:
-        return bcrypt.checkpw(_password_bytes(plain_password), password_hash.encode("utf-8"))
+        return bcrypt.checkpw(
+            _password_bytes(plain_password),
+            password_hash.encode("utf-8"),
+        )
     except (ValueError, HTTPException):
         return False
 
@@ -72,8 +82,8 @@ def create_access_token(user: User) -> str:
 
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
-    db: Session = Depends(get_db),
+    credentials: BearerCredentials,
+    db: DBSession,
 ) -> User:
     auth_error = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -101,12 +111,15 @@ def get_current_user(
     return user
 
 
+CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
 @router.post(
     "/register",
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def register(user_data: UserCreate, db: Session = Depends(get_db)) -> User:
+def register(user_data: UserCreate, db: DBSession) -> User:
     normalized_email = str(user_data.email).strip().lower()
 
     existing_user = db.query(User).filter(User.email == normalized_email).first()
@@ -141,7 +154,7 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)) -> User:
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(login_data: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
+def login(login_data: LoginRequest, db: DBSession) -> TokenResponse:
     normalized_email = str(login_data.email).strip().lower()
     user = db.query(User).filter(User.email == normalized_email).first()
 
@@ -167,5 +180,5 @@ def login(login_data: LoginRequest, db: Session = Depends(get_db)) -> TokenRespo
 
 
 @router.get("/me", response_model=UserResponse)
-def me(current_user: User = Depends(get_current_user)) -> User:
+def me(current_user: CurrentUser) -> User:
     return current_user
