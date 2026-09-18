@@ -1,5 +1,6 @@
 import os
 import re
+from typing import Annotated
 from urllib.parse import urlparse
 
 import httpx
@@ -11,6 +12,8 @@ from models import User
 from permissions import require_permission
 
 router = APIRouter()
+
+CurrentUser = Annotated[User, Depends(get_current_user)]
 
 TRANSLATION_PROVIDER = os.getenv("TRANSLATION_PROVIDER", "disabled").strip().lower()
 TRANSLATION_BASE_URL = os.getenv("TRANSLATION_BASE_URL", "http://127.0.0.1:5000").rstrip("/")
@@ -144,7 +147,7 @@ def _translate_openai_compatible(text: str, source: str, target: str) -> tuple[s
 
 
 @router.get("/capabilities", response_model=TranslationCapabilitiesResponse)
-def translation_capabilities(current_user: User = Depends(get_current_user)) -> TranslationCapabilitiesResponse:
+def translation_capabilities(current_user: CurrentUser) -> TranslationCapabilitiesResponse:
     require_permission(current_user, "translation.use")
     return TranslationCapabilitiesResponse(
         provider=TRANSLATION_PROVIDER,
@@ -158,7 +161,7 @@ def translation_capabilities(current_user: User = Depends(get_current_user)) -> 
 @router.post("", response_model=TranslationResponse)
 def translate(
     data: TranslationRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
 ) -> TranslationResponse:
     require_permission(current_user, "translation.use")
     source = _normalize_language_tag(data.source_language, allow_auto=True)
