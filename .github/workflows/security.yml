@@ -1,0 +1,41 @@
+name: Safety360 Security
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - safety360-phase1-auth
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: "15 4 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install security tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Static security scan
+        run: bandit -q -r . -x ./tests,./migrations,./venv,./.venv
+
+      - name: Dependency vulnerability audit
+        run: pip-audit -r requirements.txt
