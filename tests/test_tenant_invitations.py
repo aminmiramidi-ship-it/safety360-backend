@@ -1,4 +1,17 @@
+import os
+from pathlib import Path
+
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
+
+TEST_DB = Path("test_safety360.db")
+os.environ.setdefault("DATABASE_URL", f"sqlite:///{TEST_DB.resolve().as_posix()}")
+os.environ.setdefault(
+    "SAFETY360_SECRET_KEY",
+    "test-secret-key-for-ci-only-change-in-production-1234567890",
+)
+os.environ.setdefault("ENCRYPTION_KEY", Fernet.generate_key().decode("utf-8"))
+os.environ.setdefault("SAFETY360_ENV", "test")
 
 from main import app
 
