@@ -13,6 +13,7 @@ def capabilities() -> PlatformCapabilitiesResponse:
     storage_provider = os.getenv("STORAGE_PROVIDER", "local").lower()
     assistant_provider = os.getenv("AI_PROVIDER", "rules").lower()
     billing_provider = os.getenv("BILLING_PROVIDER", "manual").lower()
+    translation_provider = os.getenv("TRANSLATION_PROVIDER", "disabled").lower()
 
     return PlatformCapabilitiesResponse(
         environment=environment,
@@ -25,6 +26,8 @@ def capabilities() -> PlatformCapabilitiesResponse:
             "document_control": True,
             "file_storage": True,
             "assistant": assistant_provider != "disabled",
+            "translation": translation_provider != "disabled",
+            "ims_orchestration": True,
             "billing_foundation": True,
             "external_payment_processing": billing_provider not in {"manual", "disabled"},
             "production_migrations": True,
