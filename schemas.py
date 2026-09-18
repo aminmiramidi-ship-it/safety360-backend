@@ -136,5 +136,101 @@ class DocumentListResponse(BaseModel):
     documents: list[DocumentResponse]
 
 
+class StoredFileResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    logical_id: str
+    tenant_id: int
+    original_name: str
+    media_type: str | None = None
+    size_bytes: int
+    sha256: str
+    category: str
+    folder: str
+    created_by_id: int
+    archived_at: datetime | None = None
+    created_at: datetime
+
+
+class StoredFileListResponse(BaseModel):
+    files: list[StoredFileResponse]
+
+
+class AssistantThreadCreate(BaseModel):
+    title: str = Field(default="Safety360 Assistant", min_length=2, max_length=250)
+
+
+class AssistantThreadResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    tenant_id: int
+    title: str
+    created_by_id: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class AssistantThreadListResponse(BaseModel):
+    threads: list[AssistantThreadResponse]
+
+
+class AssistantMessageCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=12000)
+
+
+class AssistantMessageResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    thread_id: int
+    tenant_id: int
+    role: str
+    content: str
+    provider: str
+    model: str | None = None
+    created_by_id: int | None = None
+    created_at: datetime
+
+
+class AssistantTurnResponse(BaseModel):
+    user_message: AssistantMessageResponse
+    assistant_message: AssistantMessageResponse
+
+
+class SubscriptionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    tenant_id: int
+    plan_code: str
+    status: str
+    provider: str
+    current_period_end: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class BillingPlanResponse(BaseModel):
+    code: str
+    name: str
+    description: str
+    features: list[str]
+    commercial_activation_required: bool
+
+
+class BillingPlanListResponse(BaseModel):
+    plans: list[BillingPlanResponse]
+
+
+class PlatformCapabilitiesResponse(BaseModel):
+    environment: str
+    storage_provider: str
+    assistant_provider: str
+    billing_provider: str
+    features: dict[str, bool]
+
+
 class ExportData(BaseModel):
     lines: list[str]
