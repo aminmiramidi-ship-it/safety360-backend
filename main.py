@@ -2,7 +2,7 @@ import io
 import os
 import tempfile
 from pathlib import Path
-from typing import Dict
+from typing import Annotated
 
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, WebSocket, status
@@ -12,7 +12,8 @@ from fastapi.responses import FileResponse
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
-from auth import get_current_user, router as auth_router
+from auth import get_current_user
+from auth import router as auth_router
 from database import Base, engine, get_db
 from models import AuditLog, Ticket, User
 from schemas import (
@@ -28,6 +29,10 @@ from tenants import router as tenant_router
 APP_VERSION = "1.2.0"
 ENVIRONMENT = os.getenv("SAFETY360_ENV", "development").lower()
 MAX_IMPORT_BYTES = int(os.getenv("MAX_IMPORT_BYTES", str(20 * 1024 * 1024)))
+
+DBSession = Annotated[Session, Depends(get_db)]
+CurrentUser = Annotated[User, Depends(get_current_user)]
+PDFUpload = Annotated[UploadFile, File()]
 
 
 def build_fernet() -> Fernet:
@@ -82,7 +87,7 @@ app.include_router(tenant_router, prefix="/tenants", tags=["Tenants"])
 
 
 @app.get("/", tags=["System"])
-def root() -> Dict[str, str]:
+def root() -> dict[str, str]:
     return {
         "status": "ok",
         "message": "Safety360 Backend läuft",
@@ -91,7 +96,7 @@ def root() -> Dict[str, str]:
 
 
 @app.get("/status", tags=["System"])
-def api_status() -> Dict[str, str]:
+def api_status() -> dict[str, str]:
     return {
         "status": "ok",
         "service": "Safety360 Backend",
@@ -101,7 +106,7 @@ def api_status() -> Dict[str, str]:
 
 
 @app.get("/dashboard", response_model=DashboardResponse, tags=["Dashboard"])
-def dashboard(current_user: User = Depends(get_current_user)) -> DashboardResponse:
+def dashboard(current_user: CurrentUser) -> DashboardResponse:
     return DashboardResponse(
         message=f"Willkommen bei Safety360, {current_user.full_name or current_user.email}.",
         user=UserResponse.model_validate(current_user),
@@ -122,7 +127,7 @@ PSA_DATA = {
 def get_psa(
     industry: str,
     activity: str,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
 ):
     del current_user
     industry_key = industry.strip().lower()
@@ -167,8 +172,8 @@ def ticket_to_response(ticket: Ticket) -> TicketResponse:
 )
 def create_ticket(
     ticket_data: TicketCreate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    current_user: CurrentUser,
+    db: DBSession,
 ) -> TicketResponse:
     ticket = Ticket(
         description_encrypted=encrypt_text(ticket_data.description.strip()),
@@ -195,8 +200,8 @@ def create_ticket(
 
 @app.get("/tickets", response_model=TicketListResponse, tags=["Tickets"])
 def list_tickets(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    current_user: CurrentUser,
+    db: DBSession,
 ) -> TicketListResponse:
     query = db.query(Ticket)
 
@@ -220,7 +225,7 @@ def remove_temp_file(path: str) -> None:
 def export_pdf(
     data: ExportData,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUser,
 ):
     del current_user
     from fpdf import FPDF
@@ -232,12 +237,9 @@ def export_pdf(
     for line in data.lines:
         pdf.multi_cell(0, 8, text=str(line))
 
-    temp_file = tempfile.NamedTemporaryFile(
-        suffix=".pdf",
-        delete=False,
-    )
-    temp_path = temp_file.name
-    temp_file.close()
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as temp_file:
+        temp_path = temp_file.name
+
     pdf.output(temp_path)
 
     background_tasks.add_task(remove_temp_file, temp_path)
@@ -250,8 +252,8 @@ def export_pdf(
 
 @app.post("/import", tags=["Documents"])
 async def import_pdf(
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
+    file: PDFUpload,
+    current_user: CurrentUser,
 ):
     del current_user
     import pdfplumber
@@ -286,9 +288,7 @@ async def import_pdf(
 
 
 @app.get("/admin/db", tags=["Admin"])
-def admin_db(
-    current_user: User = Depends(get_current_user),
-):
+def admin_db(current_user: CurrentUser):
     if current_user.role != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
