@@ -54,6 +54,37 @@ class TenantResponse(BaseModel):
     created_at: datetime
 
 
+class TenantInvitationCreate(BaseModel):
+    email: EmailStr
+    role: str = Field(default="user", min_length=2, max_length=50)
+    expires_in_hours: int = Field(default=72, ge=1, le=168)
+
+
+class TenantInvitationAccept(BaseModel):
+    invitation_token: str = Field(min_length=32, max_length=512)
+
+
+class TenantInvitationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    tenant_id: int
+    email: EmailStr
+    role: str
+    created_by_id: int
+    expires_at: datetime
+    accepted_at: datetime | None = None
+    created_at: datetime
+
+
+class TenantInvitationCreated(TenantInvitationResponse):
+    invitation_token: str
+
+
+class TenantInvitationListResponse(BaseModel):
+    invitations: list[TenantInvitationResponse]
+
+
 class TicketCreate(BaseModel):
     description: str = Field(min_length=1, max_length=10000)
     status: str = Field(default="open", min_length=1, max_length=50)
