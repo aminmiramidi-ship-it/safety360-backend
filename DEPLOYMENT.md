@@ -2,11 +2,11 @@
 
 ## Target
 
-The backend is prepared for deployment as a FastAPI application on Vercel.
+The backend is prepared for deployment as a FastAPI application with a persistent PostgreSQL database.
 
 ## Required production environment variables
 
-Set these in Vercel for Production and Preview as appropriate:
+Set these for Production and Preview as appropriate:
 
 - `SAFETY360_ENV=production`
 - `SAFETY360_SECRET_KEY=<strong random secret>`
@@ -16,9 +16,26 @@ Set these in Vercel for Production and Preview as appropriate:
 - `ACCESS_TOKEN_EXPIRE_MINUTES=60`
 - `MAX_IMPORT_BYTES=20971520`
 
-## Important database rule
+## Database rule
 
-Do not use the local SQLite fallback in production. Vercel Functions use ephemeral/serverless compute, so application data must be stored in a persistent external database. The current production target is PostgreSQL through SQLAlchemy and psycopg.
+Do not use SQLite in production. Serverless and ephemeral compute cannot safely persist the local SQLite file. Production must use a persistent PostgreSQL service.
+
+The production application intentionally does not call `Base.metadata.create_all()`. Database changes must be explicit and auditable through Alembic migrations.
+
+Before the first production start and after every approved schema change, run:
+
+```cmd
+alembic upgrade head
+```
+
+For a future schema change:
+
+```cmd
+alembic revision --autogenerate -m "describe change"
+alembic upgrade head
+```
+
+Always back up production data before destructive migrations.
 
 ## Generate secrets locally
 
@@ -53,10 +70,21 @@ After deployment verify:
 - `POST /auth/register`
 - `POST /auth/login`
 - `GET /auth/me` with Bearer token
+- `POST /tenants` with Bearer token
+- `GET /tenants/current` with Bearer token
 - `GET /dashboard` with Bearer token
 - `POST /tickets` with Bearer token
 - `GET /tickets` with Bearer token
 
-## Migration note
+## CI gates
 
-The current prototype creates missing tables automatically. Before production data is introduced, database schema changes should be moved to Alembic migrations so upgrades are explicit, reversible and auditable.
+The GitHub Actions workflow checks:
+
+- Python compilation
+- Ruff linting
+- Alembic migration creation of the expected schema
+- authentication flow
+- tenant onboarding
+- tenant ticket isolation
+
+A production merge should only happen after these checks and a local smoke test pass.
