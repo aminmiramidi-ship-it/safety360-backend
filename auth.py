@@ -4,9 +4,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 import bcrypt
+import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
+from jwt import InvalidTokenError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -18,7 +19,7 @@ router = APIRouter()
 security = HTTPBearer(auto_error=False)
 
 ALGORITHM = "HS256"
-TOKEN_TYPE = "bearer"  # nosec B105 - OAuth token scheme label, not a password/secret.
+TOKEN_TYPE = "bearer"  # nosec B105
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 ENVIRONMENT = os.getenv("SAFETY360_ENV", "development").lower()
 
@@ -100,9 +101,10 @@ def get_current_user(
             credentials.credentials,
             SECRET_KEY,
             algorithms=[ALGORITHM],
+            options={"require": ["sub", "exp", "iat"]},
         )
         user_id = int(payload.get("sub"))
-    except (JWTError, TypeError, ValueError):
+    except (InvalidTokenError, TypeError, ValueError):
         raise auth_error
 
     user = db.query(User).filter(User.id == user_id).first()
