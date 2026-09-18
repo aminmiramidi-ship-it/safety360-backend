@@ -33,8 +33,9 @@ from schemas import (
     UserResponse,
 )
 from tenants import router as tenant_router
+from translation_api import router as translation_router
 
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.6.0"
 ENVIRONMENT = os.getenv("SAFETY360_ENV", "development").lower()
 MAX_IMPORT_BYTES = int(os.getenv("MAX_IMPORT_BYTES", str(20 * 1024 * 1024)))
 
@@ -70,7 +71,7 @@ if ENVIRONMENT != "production":
 app = FastAPI(
     title="Safety360 API",
     version=APP_VERSION,
-    description="Safety360 Backend für HSE, IMS, Dokumente, Ablage, Tickets, KI und Plattformdienste.",
+    description="Safety360 Backend für HSE, IMS, Dokumente, Ablage, Tickets, KI, Übersetzung und Plattformdienste.",
 )
 
 cors_origins = [
@@ -123,6 +124,7 @@ app.include_router(tenant_router, prefix="/tenants", tags=["Tenants"])
 app.include_router(document_router, prefix="/documents", tags=["Document Control"])
 app.include_router(file_router, prefix="/files", tags=["File Storage"])
 app.include_router(assistant_router, prefix="/assistant", tags=["Assistant"])
+app.include_router(translation_router, prefix="/translation", tags=["Translation"])
 app.include_router(ims_router, prefix="/ims", tags=["IMS Orchestration"])
 app.include_router(billing_router, prefix="/billing", tags=["Billing"])
 app.include_router(platform_router, prefix="/platform", tags=["Platform"])
