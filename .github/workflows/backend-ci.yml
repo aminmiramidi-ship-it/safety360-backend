@@ -60,6 +60,8 @@ jobs:
               "assistant_threads",
               "assistant_messages",
               "tenant_subscriptions",
+              "ims_activities",
+              "ims_artifacts",
               "audit_log",
           }
           missing = required - tables
