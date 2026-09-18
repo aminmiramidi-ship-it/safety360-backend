@@ -138,6 +138,96 @@ class Document(Base):
     )
 
 
+class IMSActivity(Base):
+    __tablename__ = "ims_activities"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(
+        Integer,
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    title = Column(String(250), nullable=False)
+    description = Column(Text, nullable=False)
+    industry = Column(String(120), nullable=True, index=True)
+    location = Column(String(250), nullable=True)
+    equipment = Column(Text, nullable=True)
+    substances = Column(Text, nullable=True)
+    environmental_context = Column(Text, nullable=True)
+    energy_context = Column(Text, nullable=True)
+    quality_context = Column(Text, nullable=True)
+    information_security_context = Column(Text, nullable=True)
+    status = Column(String(30), nullable=False, default="draft", index=True)
+    created_by_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+
+class IMSArtifact(Base):
+    __tablename__ = "ims_artifacts"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "logical_id",
+            "version",
+            name="uq_ims_artifact_tenant_logical_version",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(
+        Integer,
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    activity_id = Column(
+        Integer,
+        ForeignKey("ims_activities.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    logical_id = Column(String(36), nullable=False, index=True)
+    artifact_type = Column(String(80), nullable=False, index=True)
+    title = Column(String(300), nullable=False)
+    version = Column(Integer, nullable=False, default=1)
+    status = Column(String(30), nullable=False, default="draft", index=True)
+    content_json = Column(Text, nullable=False)
+    standards_json = Column(Text, nullable=False)
+    generation_mode = Column(String(50), nullable=False, default="rules")
+    created_by_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    approved_by_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+
 class StoredFile(Base):
     __tablename__ = "stored_files"
     __table_args__ = (
