@@ -7,7 +7,14 @@ from sqlalchemy.orm import Session
 
 from auth import get_current_user
 from database import get_db
-from models import AssistantMessage, AssistantThread, AuditLog, Document, StoredFile, User
+from models import (
+    AssistantMessage,
+    AssistantThread,
+    AuditLog,
+    Document,
+    StoredFile,
+    User,
+)
 from permissions import require_permission
 from schemas import (
     AssistantMessageCreate,
