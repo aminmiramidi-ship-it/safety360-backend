@@ -1,6 +1,7 @@
 name: Safety360 Backend CI
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -8,6 +9,9 @@ on:
   pull_request:
     branches:
       - main
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -29,9 +33,27 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Compile Python files
+        run: python -m compileall -q .
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Verify initial migration
+        env:
+          DATABASE_URL: sqlite:///./migration_test.db
         run: |
-          python -m compileall -q .
+          alembic upgrade head
+          python - <<'PY'
+          from sqlalchemy import create_engine, inspect
+
+          engine = create_engine("sqlite:///./migration_test.db")
+          tables = set(inspect(engine).get_table_names())
+          required = {"alembic_version", "tenants", "users", "tickets", "audit_log"}
+          missing = required - tables
+          if missing:
+              raise SystemExit(f"Missing migrated tables: {sorted(missing)}")
+          print("Migration tables verified:", sorted(tables))
+          PY
 
       - name: Run tests
-        run: |
-          pytest -q
+        run: pytest -q
