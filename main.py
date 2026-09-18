@@ -20,6 +20,7 @@ from billing_api import router as billing_router
 from database import Base, engine, get_db
 from documents import router as document_router
 from files_api import router as file_router
+from ims_api import router as ims_router
 from models import AuditLog, Ticket, User
 from permissions import require_permission
 from platform_api import router as platform_router
@@ -33,7 +34,7 @@ from schemas import (
 )
 from tenants import router as tenant_router
 
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.5.0"
 ENVIRONMENT = os.getenv("SAFETY360_ENV", "development").lower()
 MAX_IMPORT_BYTES = int(os.getenv("MAX_IMPORT_BYTES", str(20 * 1024 * 1024)))
 
@@ -122,6 +123,7 @@ app.include_router(tenant_router, prefix="/tenants", tags=["Tenants"])
 app.include_router(document_router, prefix="/documents", tags=["Document Control"])
 app.include_router(file_router, prefix="/files", tags=["File Storage"])
 app.include_router(assistant_router, prefix="/assistant", tags=["Assistant"])
+app.include_router(ims_router, prefix="/ims", tags=["IMS Orchestration"])
 app.include_router(billing_router, prefix="/billing", tags=["Billing"])
 app.include_router(platform_router, prefix="/platform", tags=["Platform"])
 
