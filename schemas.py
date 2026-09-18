@@ -72,5 +72,38 @@ class TicketListResponse(BaseModel):
     tickets: list[TicketResponse]
 
 
+class DocumentCreate(BaseModel):
+    title: str = Field(min_length=2, max_length=250)
+    document_type: str = Field(min_length=2, max_length=80)
+    content_summary: str | None = Field(default=None, max_length=20000)
+
+
+class DocumentRevisionCreate(BaseModel):
+    title: str | None = Field(default=None, min_length=2, max_length=250)
+    content_summary: str | None = Field(default=None, max_length=20000)
+
+
+class DocumentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    logical_id: str
+    title: str
+    document_type: str
+    status: str
+    version: int
+    content_summary: str | None = None
+    tenant_id: int
+    created_by_id: int
+    approved_by_id: int | None = None
+    approved_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class DocumentListResponse(BaseModel):
+    documents: list[DocumentResponse]
+
+
 class ExportData(BaseModel):
     lines: list[str]
