@@ -12,6 +12,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "files.read",
         "files.upload",
         "assistant.use",
+        "ims.read",
     },
     "viewer": {
         "dashboard.read",
@@ -19,6 +20,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "documents.read",
         "files.read",
         "assistant.use",
+        "ims.read",
     },
     "manager": {
         "dashboard.read",
@@ -29,6 +31,9 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "files.read",
         "files.upload",
         "assistant.use",
+        "ims.read",
+        "ims.create",
+        "ims.generate",
     },
     "hse_manager": {
         "dashboard.read",
@@ -41,6 +46,10 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "files.upload",
         "files.archive",
         "assistant.use",
+        "ims.read",
+        "ims.create",
+        "ims.generate",
+        "ims.approve",
     },
     "document_controller": {
         "dashboard.read",
@@ -52,6 +61,8 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "files.upload",
         "files.archive",
         "assistant.use",
+        "ims.read",
+        "ims.approve",
     },
     "tenant_admin": {
         "dashboard.read",
@@ -67,6 +78,10 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "tenant.invite",
         "tenant.manage",
         "billing.read",
+        "ims.read",
+        "ims.create",
+        "ims.generate",
+        "ims.approve",
     },
     "admin": {"*"},
 }
