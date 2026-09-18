@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - safety360-phase1-auth
+      - safety360-platform-core
   pull_request:
     branches:
       - main
@@ -55,6 +56,10 @@ jobs:
               "users",
               "tickets",
               "documents",
+              "stored_files",
+              "assistant_threads",
+              "assistant_messages",
+              "tenant_subscriptions",
               "audit_log",
           }
           missing = required - tables
