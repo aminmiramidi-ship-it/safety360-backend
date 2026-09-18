@@ -55,5 +55,5 @@ jobs:
           print("Migration tables verified:", sorted(tables))
           PY
 
-      - name: Run tests
-        run: pytest -q
+      - name: Run tests with coverage
+        run: pytest -q --cov=. --cov-report=term-missing
