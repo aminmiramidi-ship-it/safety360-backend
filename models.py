@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
 
 from database import Base
 
@@ -16,6 +16,35 @@ class User(Base):
     language = Column(String(10), nullable=False, default="de")
     tenant_id = Column(Integer, nullable=True, index=True)
     is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+
+class Ticket(Base):
+    __tablename__ = "tickets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    description_encrypted = Column(Text, nullable=False)
+    status = Column(String(50), nullable=False, default="open")
+    created_by_id = Column(Integer, nullable=False, index=True)
+    tenant_id = Column(Integer, nullable=True, index=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event = Column(Text, nullable=False)
+    user_id = Column(Integer, nullable=True, index=True)
+    tenant_id = Column(Integer, nullable=True, index=True)
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
