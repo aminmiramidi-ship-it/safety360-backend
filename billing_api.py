@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from auth import get_current_user
 from database import get_db
-from models import AuditLog, TenantSubscription, User
+from models import TenantSubscription, User
 from permissions import require_permission
 from schemas import BillingPlanListResponse, BillingPlanResponse, SubscriptionResponse
 
