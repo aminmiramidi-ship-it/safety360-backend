@@ -18,7 +18,7 @@ router = APIRouter()
 security = HTTPBearer(auto_error=False)
 
 ALGORITHM = "HS256"
-TOKEN_TYPE = "bearer"
+TOKEN_TYPE = "bearer"  # nosec B105 - OAuth token scheme label, not a password/secret.
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 ENVIRONMENT = os.getenv("SAFETY360_ENV", "development").lower()
 
