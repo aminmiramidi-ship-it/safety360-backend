@@ -40,6 +40,21 @@ class DashboardResponse(BaseModel):
     user: UserResponse
 
 
+class TenantCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=200)
+    slug: Optional[str] = Field(default=None, min_length=2, max_length=100)
+
+
+class TenantResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    slug: str
+    is_active: bool
+    created_at: datetime
+
+
 class TicketCreate(BaseModel):
     description: str = Field(min_length=1, max_length=10000)
     status: str = Field(default="open", min_length=1, max_length=50)
