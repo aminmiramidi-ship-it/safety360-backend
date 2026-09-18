@@ -197,3 +197,100 @@ def test_tenant_onboarding_and_isolation():
         json={"name": "Should Fail GmbH"},
     )
     assert second_tenant_attempt.status_code == 409
+
+
+def test_document_control_workflow_and_tenant_isolation():
+    owner_headers = register_and_login(
+        "document-owner@example.com",
+        "Document Owner",
+    )
+
+    tenant_response = client.post(
+        "/tenants",
+        headers=owner_headers,
+        json={"name": "Document Control GmbH"},
+    )
+    assert tenant_response.status_code == 201, tenant_response.text
+
+    create_response = client.post(
+        "/documents",
+        headers=owner_headers,
+        json={
+            "title": "Gefährdungsbeurteilung Arbeiten in der Höhe",
+            "document_type": "risk_assessment",
+            "content_summary": "Initiale kontrollierte Dokumentversion.",
+        },
+    )
+    assert create_response.status_code == 201, create_response.text
+    document = create_response.json()
+    assert document["status"] == "draft"
+    assert document["version"] == 1
+    assert document["logical_id"]
+
+    submit_response = client.post(
+        f"/documents/{document['id']}/submit-review",
+        headers=owner_headers,
+    )
+    assert submit_response.status_code == 200, submit_response.text
+    assert submit_response.json()["status"] == "review"
+
+    approve_response = client.post(
+        f"/documents/{document['id']}/approve",
+        headers=owner_headers,
+    )
+    assert approve_response.status_code == 200, approve_response.text
+    approved = approve_response.json()
+    assert approved["status"] == "approved"
+    assert approved["approved_by_id"] is not None
+    assert approved["approved_at"] is not None
+
+    revision_response = client.post(
+        f"/documents/{document['id']}/revisions",
+        headers=owner_headers,
+        json={
+            "content_summary": "Überarbeitete Version nach Maßnahmenreview.",
+        },
+    )
+    assert revision_response.status_code == 201, revision_response.text
+    revision = revision_response.json()
+    assert revision["version"] == 2
+    assert revision["status"] == "draft"
+    assert revision["logical_id"] == document["logical_id"]
+
+    history_response = client.get(
+        "/documents?latest_only=false",
+        headers=owner_headers,
+    )
+    assert history_response.status_code == 200, history_response.text
+    history = history_response.json()["documents"]
+    assert len(history) == 2
+    statuses = {item["version"]: item["status"] for item in history}
+    assert statuses[1] == "obsolete"
+    assert statuses[2] == "draft"
+
+    latest_response = client.get("/documents", headers=owner_headers)
+    assert latest_response.status_code == 200, latest_response.text
+    latest_documents = latest_response.json()["documents"]
+    assert len(latest_documents) == 1
+    assert latest_documents[0]["version"] == 2
+
+    other_headers = register_and_login(
+        "other-document-admin@example.com",
+        "Other Tenant Admin",
+    )
+    other_tenant = client.post(
+        "/tenants",
+        headers=other_headers,
+        json={"name": "Other Tenant GmbH"},
+    )
+    assert other_tenant.status_code == 201, other_tenant.text
+
+    cross_tenant_read = client.get(
+        f"/documents/{revision['id']}",
+        headers=other_headers,
+    )
+    assert cross_tenant_read.status_code == 404
+
+    other_list = client.get("/documents", headers=other_headers)
+    assert other_list.status_code == 200, other_list.text
+    assert other_list.json()["documents"] == []
