@@ -2,7 +2,7 @@ import io
 import os
 import tempfile
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict
 
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, WebSocket, status
@@ -23,8 +23,9 @@ from schemas import (
     TicketResponse,
     UserResponse,
 )
+from tenants import router as tenant_router
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 ENVIRONMENT = os.getenv("SAFETY360_ENV", "development").lower()
 MAX_IMPORT_BYTES = int(os.getenv("MAX_IMPORT_BYTES", str(20 * 1024 * 1024)))
 
@@ -75,6 +76,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router, prefix="/auth", tags=["Auth"])
+app.include_router(tenant_router, prefix="/tenants", tags=["Tenants"])
 
 
 @app.get("/", tags=["System"])
