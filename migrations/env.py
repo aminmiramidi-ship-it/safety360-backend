@@ -3,8 +3,8 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import create_engine, pool
 
-from database import Base, DATABASE_URL
 import models  # noqa: F401
+from database import DATABASE_URL, Base
 
 config = context.config
 
