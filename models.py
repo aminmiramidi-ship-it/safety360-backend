@@ -47,6 +47,30 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
 
 
+class TenantInvitation(Base):
+    __tablename__ = "tenant_invitations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(
+        Integer,
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    email = Column(String(320), nullable=False, index=True)
+    role = Column(String(50), nullable=False, default="user")
+    token_hash = Column(String(64), unique=True, nullable=False, index=True)
+    created_by_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    accepted_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
 class Ticket(Base):
     __tablename__ = "tickets"
 
