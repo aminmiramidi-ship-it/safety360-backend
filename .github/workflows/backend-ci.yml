@@ -8,10 +8,12 @@ on:
       - safety360-phase1-auth
       - safety360-platform-core
       - safety360-i18n-core
+      - safety360-agent-orchestration
   pull_request:
     branches:
       - main
       - safety360-platform-core
+      - safety360-i18n-core
 
 permissions:
   contents: read
