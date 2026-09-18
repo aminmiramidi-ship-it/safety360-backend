@@ -50,7 +50,9 @@ def build_fernet() -> Fernet:
 
 
 fernet = build_fernet()
-Base.metadata.create_all(bind=engine)
+
+if ENVIRONMENT != "production":
+    Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="Safety360 API",
