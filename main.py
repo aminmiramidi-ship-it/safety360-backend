@@ -5,18 +5,34 @@ from pathlib import Path
 from typing import Annotated
 
 from cryptography.fernet import Fernet, InvalidToken
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, WebSocket, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    HTTPException,
+    Request,
+    UploadFile,
+    WebSocket,
+    status,
+)
 from fastapi.background import BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
+from assistant_api import router as assistant_router
 from auth import get_current_user
 from auth import router as auth_router
+from billing_api import router as billing_router
 from database import Base, engine, get_db
 from documents import router as document_router
+from files_api import router as file_router
+from ims_api import router as ims_router
 from models import AuditLog, Ticket, User
+from permissions import require_permission
+from platform_api import router as platform_router
 from schemas import (
     DashboardResponse,
     ExportData,
@@ -26,8 +42,9 @@ from schemas import (
     UserResponse,
 )
 from tenants import router as tenant_router
+from translation_api import router as translation_router
 
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.6.0"
 ENVIRONMENT = os.getenv("SAFETY360_ENV", "development").lower()
 MAX_IMPORT_BYTES = int(os.getenv("MAX_IMPORT_BYTES", str(20 * 1024 * 1024)))
 
@@ -63,29 +80,77 @@ if ENVIRONMENT != "production":
 app = FastAPI(
     title="Safety360 API",
     version=APP_VERSION,
-    description="Safety360 Backend für HSE, IMS, Tickets, Dokumente und KI-Workflows.",
+    description=(
+        "Safety360 Backend für HSE, IMS, Dokumente, Ablage, Tickets, KI, "
+        "Übersetzung und Plattformdienste."
+    ),
 )
 
 cors_origins = [
     origin.strip()
     for origin in os.getenv(
         "CORS_ORIGINS",
-        "http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:5174,http://localhost:5174",
+        (
+            "http://127.0.0.1:5173,http://localhost:5173,"
+            "http://127.0.0.1:5174,http://localhost:5174"
+        ),
     ).split(",")
     if origin.strip()
 ]
+if ENVIRONMENT == "production" and "*" in cors_origins:
+    raise RuntimeError("Wildcard-CORS ist in Produktion nicht zulässig.")
 
+trusted_hosts = [
+    host.strip()
+    for host in os.getenv(
+        "TRUSTED_HOSTS",
+        "127.0.0.1,localhost,testserver",
+    ).split(",")
+    if host.strip()
+]
+if ENVIRONMENT == "production" and "*" in trusted_hosts:
+    raise RuntimeError("Wildcard-Trusted-Hosts sind in Produktion nicht zulässig.")
+
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Accept",
+        "Origin",
+        "X-Requested-With",
+    ],
 )
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Cache-Control"] = "no-store"
+    if ENVIRONMENT == "production":
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
+    return response
+
 
 app.include_router(auth_router, prefix="/auth", tags=["Auth"])
 app.include_router(tenant_router, prefix="/tenants", tags=["Tenants"])
 app.include_router(document_router, prefix="/documents", tags=["Document Control"])
+app.include_router(file_router, prefix="/files", tags=["File Storage"])
+app.include_router(assistant_router, prefix="/assistant", tags=["Assistant"])
+app.include_router(translation_router, prefix="/translation", tags=["Translation"])
+app.include_router(ims_router, prefix="/ims", tags=["IMS Orchestration"])
+app.include_router(billing_router, prefix="/billing", tags=["Billing"])
+app.include_router(platform_router, prefix="/platform", tags=["Platform"])
 
 
 @app.get("/", tags=["System"])
@@ -109,8 +174,12 @@ def api_status() -> dict[str, str]:
 
 @app.get("/dashboard", response_model=DashboardResponse, tags=["Dashboard"])
 def dashboard(current_user: CurrentUser) -> DashboardResponse:
+    require_permission(current_user, "dashboard.read")
     return DashboardResponse(
-        message=f"Willkommen bei Safety360, {current_user.full_name or current_user.email}.",
+        message=(
+            f"Willkommen bei Safety360, "
+            f"{current_user.full_name or current_user.email}."
+        ),
         user=UserResponse.model_validate(current_user),
     )
 
@@ -131,14 +200,17 @@ def get_psa(
     activity: str,
     current_user: CurrentUser,
 ):
-    del current_user
+    require_permission(current_user, "dashboard.read")
     industry_key = industry.strip().lower()
     activity_key = activity.strip().lower()
 
     if industry_key in PSA_DATA and activity_key in PSA_DATA[industry_key]:
         return PSA_DATA[industry_key][activity_key]
 
-    raise HTTPException(status_code=404, detail="Keine passende PSA-Empfehlung gefunden.")
+    raise HTTPException(
+        status_code=404,
+        detail="Keine passende PSA-Empfehlung gefunden.",
+    )
 
 
 def encrypt_text(text: str) -> str:
@@ -177,6 +249,7 @@ def create_ticket(
     current_user: CurrentUser,
     db: DBSession,
 ) -> TicketResponse:
+    require_permission(current_user, "tickets.create")
     ticket = Ticket(
         description_encrypted=encrypt_text(ticket_data.description.strip()),
         status=ticket_data.status.strip().lower(),
@@ -205,6 +278,7 @@ def list_tickets(
     current_user: CurrentUser,
     db: DBSession,
 ) -> TicketListResponse:
+    require_permission(current_user, "tickets.read")
     query = db.query(Ticket)
 
     if current_user.tenant_id is not None:
@@ -213,7 +287,9 @@ def list_tickets(
         query = query.filter(Ticket.created_by_id == current_user.id)
 
     tickets = query.order_by(Ticket.created_at.desc()).all()
-    return TicketListResponse(tickets=[ticket_to_response(ticket) for ticket in tickets])
+    return TicketListResponse(
+        tickets=[ticket_to_response(ticket) for ticket in tickets]
+    )
 
 
 def remove_temp_file(path: str) -> None:
@@ -229,7 +305,7 @@ def export_pdf(
     background_tasks: BackgroundTasks,
     current_user: CurrentUser,
 ):
-    del current_user
+    require_permission(current_user, "documents.read")
     from fpdf import FPDF
 
     pdf = FPDF()
@@ -249,6 +325,7 @@ def export_pdf(
         temp_path,
         media_type="application/pdf",
         filename="safety360-export.pdf",
+        headers={"Cache-Control": "private, no-store"},
     )
 
 
@@ -257,7 +334,7 @@ async def import_pdf(
     file: PDFUpload,
     current_user: CurrentUser,
 ):
-    del current_user
+    require_permission(current_user, "documents.create")
     import pdfplumber
 
     if file.content_type not in {"application/pdf", "application/octet-stream"}:
@@ -291,12 +368,7 @@ async def import_pdf(
 
 @app.get("/admin/db", tags=["Admin"])
 def admin_db(current_user: CurrentUser):
-    if current_user.role != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Administratorrechte erforderlich.",
-        )
-
+    require_permission(current_user, "*")
     return {"tables": inspect(engine).get_table_names()}
 
 
