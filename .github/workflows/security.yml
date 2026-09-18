@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - safety360-phase1-auth
+      - safety360-platform-core
   pull_request:
     branches:
       - main
