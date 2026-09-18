@@ -1,6 +1,15 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 
 from database import Base
 
@@ -57,6 +66,52 @@ class Ticket(Base):
         index=True,
     )
     created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class Document(Base):
+    __tablename__ = "documents"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "logical_id",
+            "version",
+            name="uq_documents_tenant_logical_version",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    logical_id = Column(String(36), nullable=False, index=True)
+    title = Column(String(250), nullable=False)
+    document_type = Column(String(80), nullable=False, index=True)
+    status = Column(String(30), nullable=False, default="draft", index=True)
+    version = Column(Integer, nullable=False, default=1)
+    content_summary = Column(Text, nullable=True)
+    tenant_id = Column(
+        Integer,
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    created_by_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    approved_by_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+    )
 
 
 class AuditLog(Base):
