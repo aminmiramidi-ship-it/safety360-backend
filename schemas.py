@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -134,6 +135,111 @@ class DocumentResponse(BaseModel):
 
 class DocumentListResponse(BaseModel):
     documents: list[DocumentResponse]
+
+
+class IMSActivityCreate(BaseModel):
+    title: str = Field(min_length=2, max_length=250)
+    description: str = Field(min_length=5, max_length=30000)
+    industry: str | None = Field(default=None, max_length=120)
+    location: str | None = Field(default=None, max_length=250)
+    equipment: str | None = Field(default=None, max_length=12000)
+    substances: str | None = Field(default=None, max_length=12000)
+    environmental_context: str | None = Field(default=None, max_length=12000)
+    energy_context: str | None = Field(default=None, max_length=12000)
+    quality_context: str | None = Field(default=None, max_length=12000)
+    information_security_context: str | None = Field(default=None, max_length=12000)
+
+
+class IMSActivityResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    tenant_id: int
+    title: str
+    description: str
+    industry: str | None = None
+    location: str | None = None
+    equipment: str | None = None
+    substances: str | None = None
+    environmental_context: str | None = None
+    energy_context: str | None = None
+    quality_context: str | None = None
+    information_security_context: str | None = None
+    status: str
+    created_by_id: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class IMSActivityListResponse(BaseModel):
+    activities: list[IMSActivityResponse]
+
+
+class IMSGenerationRequest(BaseModel):
+    standards: list[str] = Field(
+        default_factory=lambda: [
+            "ISO 45001",
+            "ISO 14001",
+            "ISO 50001",
+            "ISO 9001",
+            "ISO/IEC 27001",
+            "EN 50600",
+        ],
+        min_length=1,
+        max_length=30,
+    )
+    artifact_types: list[str] = Field(
+        default_factory=lambda: [
+            "risk_assessment",
+            "operating_instruction",
+            "training_plan",
+            "ims_requirements_map",
+        ],
+        min_length=1,
+        max_length=20,
+    )
+
+
+class IMSArtifactResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    tenant_id: int
+    activity_id: int
+    logical_id: str
+    artifact_type: str
+    title: str
+    version: int
+    status: str
+    content: dict[str, Any]
+    standards: list[str]
+    generation_mode: str
+    created_by_id: int
+    approved_by_id: int | None = None
+    approved_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class IMSArtifactListResponse(BaseModel):
+    artifacts: list[IMSArtifactResponse]
+
+
+class IMSGenerationResponse(BaseModel):
+    activity: IMSActivityResponse
+    artifacts: list[IMSArtifactResponse]
+    warnings: list[str]
+
+
+class StandardRegistryItem(BaseModel):
+    identifier: str
+    domain: str
+    purpose: str
+    implementation_note: str
+
+
+class StandardRegistryResponse(BaseModel):
+    standards: list[StandardRegistryItem]
 
 
 class StoredFileResponse(BaseModel):
