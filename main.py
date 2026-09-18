@@ -1,235 +1,311 @@
+import io
 import os
-import sqlite3
-import hashlib
-import secrets
-from typing import List, Optional
+import tempfile
+from pathlib import Path
+from typing import Dict, List
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, WebSocket
+from cryptography.fernet import Fernet, InvalidToken
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, WebSocket, status
+from fastapi.background import BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
-from cryptography.fernet import Fernet
+from sqlalchemy import inspect
+from sqlalchemy.orm import Session
 
-# Load .env if present
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except:
-    pass
-
-# FastAPI instance
-app = FastAPI(
-    title="Safety360 API",
-    version="1.0",
-    description="Backend für Safety360 – PSA, Tickets, KI-Gefährdungsbeurteilung"
+from auth import get_current_user, router as auth_router
+from database import Base, engine, get_db
+from models import AuditLog, Ticket, User
+from schemas import (
+    DashboardResponse,
+    ExportData,
+    TicketCreate,
+    TicketListResponse,
+    TicketResponse,
+    UserResponse,
 )
 
-@app.get("/")
-def root():
-    return {"status": "ok", "message": "Safety360 Backend läuft"}
+APP_VERSION = "1.1.0"
+ENVIRONMENT = os.getenv("SAFETY360_ENV", "development").lower()
+MAX_IMPORT_BYTES = int(os.getenv("MAX_IMPORT_BYTES", str(20 * 1024 * 1024)))
 
-# Environment variables
-DB_URL = os.getenv("DATABASE_URL", "safety360.db")
-ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "changeme123")
-OPENAI_KEY = os.getenv("OPENAI_API_KEY", "")
-SMARTSHEET_TOKEN = os.getenv("SMARTSHEET_TOKEN", "")
-SMARTSHEET_SHEET_ID = os.getenv("SMARTSHEET_SHEET_ID", "")
 
-# Encryption handler
-if not ENCRYPTION_KEY or len(ENCRYPTION_KEY) < 10:
-    new_key = Fernet.generate_key()
-    ENCRYPTION_KEY = new_key
-    print(f"[INFO] Generated new ENCRYPTION_KEY: {new_key.decode()}")
+def build_fernet() -> Fernet:
+    configured_key = os.getenv("ENCRYPTION_KEY")
 
-if isinstance(ENCRYPTION_KEY, str):
-    ENCRYPTION_KEY = ENCRYPTION_KEY.encode()
+    if configured_key:
+        try:
+            return Fernet(configured_key.encode("utf-8"))
+        except (ValueError, TypeError) as exc:
+            raise RuntimeError("ENCRYPTION_KEY ist kein gültiger Fernet-Schlüssel.") from exc
 
-fernet = Fernet(ENCRYPTION_KEY)
+    if ENVIRONMENT == "production":
+        raise RuntimeError("ENCRYPTION_KEY muss in Produktion gesetzt sein.")
 
-def encrypt(text: str) -> str:
-    return fernet.encrypt(text.encode()).decode()
+    print(
+        "[WARNING] ENCRYPTION_KEY ist nicht gesetzt. "
+        "Für diese Development-Session wird ein temporärer Schlüssel verwendet."
+    )
+    return Fernet(Fernet.generate_key())
 
-def decrypt(token: str) -> str:
-    return fernet.decrypt(token.encode()).decode()
 
-# Models
-class UserRegister(BaseModel):
-    email: str
-    password: str
+fernet = build_fernet()
+Base.metadata.create_all(bind=engine)
 
-class UserLogin(BaseModel):
-    email: str
-    password: str
+app = FastAPI(
+    title="Safety360 API",
+    version=APP_VERSION,
+    description="Safety360 Backend für HSE, IMS, Tickets, Dokumente und KI-Workflows.",
+)
 
-class TicketCreate(BaseModel):
-    description: str
-    status: Optional[str] = "open"
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ORIGINS",
+        "http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:5174,http://localhost:5174",
+    ).split(",")
+    if origin.strip()
+]
 
-class ExportData(BaseModel):
-    lines: List[str]
-
-# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Database
-conn = sqlite3.connect(DB_URL, check_same_thread=False)
-cur = conn.cursor()
+app.include_router(auth_router, prefix="/auth", tags=["Auth"])
 
-cur.execute("""
-CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY,
-    email TEXT UNIQUE,
-    password_hash TEXT,
-    salt TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-)
-""")
 
-cur.execute("""
-CREATE TABLE IF NOT EXISTS tickets (
-    id INTEGER PRIMARY KEY,
-    description TEXT,
-    status TEXT
-)
-""")
-
-cur.execute("""
-CREATE TABLE IF NOT EXISTS audit_log (
-    id INTEGER PRIMARY KEY,
-    event TEXT,
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-)
-""")
-
-conn.commit()
-
-# Password hashing
-def hash_password(pw: str, salt: str):
-    h = hashlib.sha256()
-    h.update(salt.encode() + pw.encode())
-    return h.hexdigest()
-
-# ---------------- AUTH -----------------------
-@app.post("/register")
-def register(user: UserRegister):
-    cur.execute("SELECT 1 FROM users WHERE email=?", (user.email,))
-    if cur.fetchone():
-        raise HTTPException(status_code=400, detail="User exists")
-
-    salt = secrets.token_hex(16)
-    pw_hash = hash_password(user.password, salt)
-
-    cur.execute("INSERT INTO users (email, password_hash, salt) VALUES (?, ?, ?)",
-                (user.email, pw_hash, salt))
-    conn.commit()
-
-    return {"status": "ok", "message": "User registered"}
-
-@app.post("/login")
-def login(user: UserLogin):
-    cur.execute("SELECT id, password_hash, salt FROM users WHERE email=?", (user.email,))
-    row = cur.fetchone()
-    if not row:
-        raise HTTPException(401, "Invalid credentials")
-
-    uid, pw_hash, salt = row
-    if hash_password(user.password, salt) != pw_hash:
-        raise HTTPException(401, "Invalid credentials")
-
-    token = encrypt(f"{uid}:{user.email}")
-
+@app.get("/", tags=["System"])
+def root() -> Dict[str, str]:
     return {
         "status": "ok",
-        "token": token,
-        "email": user.email,
-        "user_id": uid
+        "message": "Safety360 Backend läuft",
+        "version": APP_VERSION,
     }
 
-# ---------------- PSA ------------------------
+
+@app.get("/status", tags=["System"])
+def api_status() -> Dict[str, str]:
+    return {
+        "status": "ok",
+        "service": "Safety360 Backend",
+        "version": APP_VERSION,
+        "environment": ENVIRONMENT,
+    }
+
+
+@app.get("/dashboard", response_model=DashboardResponse, tags=["Dashboard"])
+def dashboard(current_user: User = Depends(get_current_user)) -> DashboardResponse:
+    return DashboardResponse(
+        message=f"Willkommen bei Safety360, {current_user.full_name or current_user.email}.",
+        user=UserResponse.model_validate(current_user),
+    )
+
+
 PSA_DATA = {
     "construction": {
         "working at heights": {
             "equipment": ["Safety harness", "Helmet", "Lanyard"],
-            "regulations": ["DGUV 112-198", "ArbSchG §5"]
+            "regulations": ["DGUV 112-198", "ArbSchG §5"],
         }
     }
 }
 
-@app.get("/psa")
-def get_psa(industry: str, activity: str):
-    i = industry.lower()
-    a = activity.lower()
-    if i in PSA_DATA and a in PSA_DATA[i]:
-        return PSA_DATA[i][a]
-    raise HTTPException(404, "No PSA found")
 
-# ---------------- Tickets --------------------
-@app.post("/tickets")
-def create_ticket(ticket: TicketCreate):
-    enc = encrypt(ticket.description)
-    cur.execute("INSERT INTO tickets (description, status) VALUES (?, ?)",
-                (enc, ticket.status))
-    conn.commit()
-    return {"ticket_id": cur.lastrowid}
+@app.get("/psa", tags=["HSE"])
+def get_psa(
+    industry: str,
+    activity: str,
+    current_user: User = Depends(get_current_user),
+):
+    del current_user
+    industry_key = industry.strip().lower()
+    activity_key = activity.strip().lower()
 
-@app.get("/tickets")
-def list_tickets():
-    cur.execute("SELECT id, description, status FROM tickets")
-    rows = cur.fetchall()
-    out = []
-    for tid, enc, status in rows:
-        try:
-            dec = decrypt(enc)
-        except:
-            dec = "(error decrypting)"
-        out.append({"id": tid, "description": dec, "status": status})
-    return {"tickets": out}
+    if industry_key in PSA_DATA and activity_key in PSA_DATA[industry_key]:
+        return PSA_DATA[industry_key][activity_key]
 
-# ---------------- Export ---------------------
-@app.post("/export/pdf")
-def export_pdf(data: ExportData):
+    raise HTTPException(status_code=404, detail="Keine passende PSA-Empfehlung gefunden.")
+
+
+def encrypt_text(text: str) -> str:
+    return fernet.encrypt(text.encode("utf-8")).decode("utf-8")
+
+
+def decrypt_text(token: str) -> str:
+    try:
+        return fernet.decrypt(token.encode("utf-8")).decode("utf-8")
+    except (InvalidToken, ValueError, TypeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Gespeicherte Ticketdaten konnten nicht entschlüsselt werden.",
+        ) from exc
+
+
+def ticket_to_response(ticket: Ticket) -> TicketResponse:
+    return TicketResponse(
+        id=ticket.id,
+        description=decrypt_text(ticket.description_encrypted),
+        status=ticket.status,
+        created_by_id=ticket.created_by_id,
+        tenant_id=ticket.tenant_id,
+        created_at=ticket.created_at,
+    )
+
+
+@app.post(
+    "/tickets",
+    response_model=TicketResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Tickets"],
+)
+def create_ticket(
+    ticket_data: TicketCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> TicketResponse:
+    ticket = Ticket(
+        description_encrypted=encrypt_text(ticket_data.description.strip()),
+        status=ticket_data.status.strip().lower(),
+        created_by_id=current_user.id,
+        tenant_id=current_user.tenant_id,
+    )
+
+    db.add(ticket)
+    db.flush()
+
+    db.add(
+        AuditLog(
+            event=f"ticket_created:{ticket.id}",
+            user_id=current_user.id,
+            tenant_id=current_user.tenant_id,
+        )
+    )
+
+    db.commit()
+    db.refresh(ticket)
+    return ticket_to_response(ticket)
+
+
+@app.get("/tickets", response_model=TicketListResponse, tags=["Tickets"])
+def list_tickets(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> TicketListResponse:
+    query = db.query(Ticket)
+
+    if current_user.tenant_id is not None:
+        query = query.filter(Ticket.tenant_id == current_user.tenant_id)
+    else:
+        query = query.filter(Ticket.created_by_id == current_user.id)
+
+    tickets = query.order_by(Ticket.created_at.desc()).all()
+    return TicketListResponse(tickets=[ticket_to_response(ticket) for ticket in tickets])
+
+
+def remove_temp_file(path: str) -> None:
+    try:
+        Path(path).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+@app.post("/export/pdf", tags=["Documents"])
+def export_pdf(
+    data: ExportData,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+):
+    del current_user
     from fpdf import FPDF
+
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", size=12)
+    pdf.set_font("Helvetica", size=12)
+
     for line in data.lines:
-        pdf.cell(200, 10, txt=line, ln=True)
-    pdf.output("export.pdf")
-    return FileResponse("export.pdf")
+        pdf.multi_cell(0, 8, text=str(line))
 
-# ---------------- Import PDF -----------------
-@app.post("/import")
-async def import_pdf(file: UploadFile):
+    temp_file = tempfile.NamedTemporaryFile(
+        suffix=".pdf",
+        delete=False,
+    )
+    temp_path = temp_file.name
+    temp_file.close()
+    pdf.output(temp_path)
+
+    background_tasks.add_task(remove_temp_file, temp_path)
+    return FileResponse(
+        temp_path,
+        media_type="application/pdf",
+        filename="safety360-export.pdf",
+    )
+
+
+@app.post("/import", tags=["Documents"])
+async def import_pdf(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    del current_user
     import pdfplumber
-    import io
 
-    content = await file.read()
-    with pdfplumber.open(io.BytesIO(content)) as pdf:
-        text = "\n".join([page.extract_text() or "" for page in pdf.pages])
+    if file.content_type not in {"application/pdf", "application/octet-stream"}:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Aktuell werden nur PDF-Dateien unterstützt.",
+        )
 
-    return {"text": text}
+    content = await file.read(MAX_IMPORT_BYTES + 1)
+    if len(content) > MAX_IMPORT_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Die hochgeladene Datei ist zu groß.",
+        )
 
-# ---------------- Admin ----------------------
-@app.get("/admin/db")
-def admin_db(token: str):
-    if token != ADMIN_TOKEN:
-        raise HTTPException(403, "Forbidden")
-    cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    return {"tables": [r[0] for r in cur.fetchall()]}
+    try:
+        with pdfplumber.open(io.BytesIO(content)) as pdf:
+            text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Die PDF-Datei konnte nicht verarbeitet werden.",
+        ) from exc
 
-# ---------------- WebSocket ------------------
+    return {
+        "filename": file.filename,
+        "characters": len(text),
+        "text": text,
+    }
+
+
+@app.get("/admin/db", tags=["Admin"])
+def admin_db(
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administratorrechte erforderlich.",
+        )
+
+    return {"tables": inspect(engine).get_table_names()}
+
+
 @app.websocket("/ws")
-async def ws(websocket: WebSocket):
+async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     await websocket.send_text("Connected to Safety360 WebSocket")
+    await websocket.close()
 
-# ---------------- Start ----------------------
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
+
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", "8000")),
+    )
