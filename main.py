@@ -5,7 +5,16 @@ from pathlib import Path
 from typing import Annotated
 
 from cryptography.fernet import Fernet, InvalidToken
-from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile, WebSocket, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    HTTPException,
+    Request,
+    UploadFile,
+    WebSocket,
+    status,
+)
 from fastapi.background import BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -71,14 +80,20 @@ if ENVIRONMENT != "production":
 app = FastAPI(
     title="Safety360 API",
     version=APP_VERSION,
-    description="Safety360 Backend für HSE, IMS, Dokumente, Ablage, Tickets, KI, Übersetzung und Plattformdienste.",
+    description=(
+        "Safety360 Backend für HSE, IMS, Dokumente, Ablage, Tickets, KI, "
+        "Übersetzung und Plattformdienste."
+    ),
 )
 
 cors_origins = [
     origin.strip()
     for origin in os.getenv(
         "CORS_ORIGINS",
-        "http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:5174,http://localhost:5174",
+        (
+            "http://127.0.0.1:5173,http://localhost:5173,"
+            "http://127.0.0.1:5174,http://localhost:5174"
+        ),
     ).split(",")
     if origin.strip()
 ]
@@ -102,7 +117,13 @@ app.add_middleware(
     allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Accept",
+        "Origin",
+        "X-Requested-With",
+    ],
 )
 
 
@@ -115,7 +136,9 @@ async def security_headers(request: Request, call_next):
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     response.headers["Cache-Control"] = "no-store"
     if ENVIRONMENT == "production":
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
     return response
 
 
@@ -153,7 +176,10 @@ def api_status() -> dict[str, str]:
 def dashboard(current_user: CurrentUser) -> DashboardResponse:
     require_permission(current_user, "dashboard.read")
     return DashboardResponse(
-        message=f"Willkommen bei Safety360, {current_user.full_name or current_user.email}.",
+        message=(
+            f"Willkommen bei Safety360, "
+            f"{current_user.full_name or current_user.email}."
+        ),
         user=UserResponse.model_validate(current_user),
     )
 
@@ -181,7 +207,10 @@ def get_psa(
     if industry_key in PSA_DATA and activity_key in PSA_DATA[industry_key]:
         return PSA_DATA[industry_key][activity_key]
 
-    raise HTTPException(status_code=404, detail="Keine passende PSA-Empfehlung gefunden.")
+    raise HTTPException(
+        status_code=404,
+        detail="Keine passende PSA-Empfehlung gefunden.",
+    )
 
 
 def encrypt_text(text: str) -> str:
@@ -258,7 +287,9 @@ def list_tickets(
         query = query.filter(Ticket.created_by_id == current_user.id)
 
     tickets = query.order_by(Ticket.created_at.desc()).all()
-    return TicketListResponse(tickets=[ticket_to_response(ticket) for ticket in tickets])
+    return TicketListResponse(
+        tickets=[ticket_to_response(ticket) for ticket in tickets]
+    )
 
 
 def remove_temp_file(path: str) -> None:
