@@ -138,6 +138,122 @@ class Document(Base):
     )
 
 
+class StoredFile(Base):
+    __tablename__ = "stored_files"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "logical_id",
+            name="uq_stored_files_tenant_logical_id",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    logical_id = Column(String(36), nullable=False, index=True)
+    tenant_id = Column(
+        Integer,
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    original_name = Column(String(255), nullable=False)
+    storage_key = Column(String(500), nullable=False, unique=True)
+    media_type = Column(String(160), nullable=True)
+    size_bytes = Column(Integer, nullable=False)
+    sha256 = Column(String(64), nullable=False, index=True)
+    category = Column(String(80), nullable=False, default="general", index=True)
+    folder = Column(String(250), nullable=False, default="/")
+    created_by_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    archived_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class AssistantThread(Base):
+    __tablename__ = "assistant_threads"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(
+        Integer,
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    title = Column(String(250), nullable=False)
+    created_by_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+
+class AssistantMessage(Base):
+    __tablename__ = "assistant_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    thread_id = Column(
+        Integer,
+        ForeignKey("assistant_threads.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    tenant_id = Column(
+        Integer,
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    role = Column(String(20), nullable=False)
+    content = Column(Text, nullable=False)
+    provider = Column(String(50), nullable=False, default="rules")
+    model = Column(String(120), nullable=True)
+    created_by_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class TenantSubscription(Base):
+    __tablename__ = "tenant_subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(
+        Integer,
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    plan_code = Column(String(50), nullable=False, default="trial")
+    status = Column(String(50), nullable=False, default="trialing")
+    provider = Column(String(50), nullable=False, default="manual")
+    external_customer_id = Column(String(255), nullable=True)
+    external_subscription_id = Column(String(255), nullable=True)
+    current_period_end = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+
 class AuditLog(Base):
     __tablename__ = "audit_log"
 
