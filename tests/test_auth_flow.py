@@ -12,7 +12,7 @@ os.environ["SAFETY360_SECRET_KEY"] = "test-secret-key-for-ci-only-change-in-prod
 os.environ["ENCRYPTION_KEY"] = Fernet.generate_key().decode("utf-8")
 os.environ["SAFETY360_ENV"] = "test"
 
-from main import app  # noqa: E402
+from main import app
 
 client = TestClient(app)
 
