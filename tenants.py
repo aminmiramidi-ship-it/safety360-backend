@@ -1,5 +1,6 @@
 import re
 import unicodedata
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
@@ -11,6 +12,9 @@ from models import AuditLog, Tenant, User
 from schemas import TenantCreate, TenantResponse
 
 router = APIRouter()
+
+DBSession = Annotated[Session, Depends(get_db)]
+CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
 def _slugify(value: str) -> str:
@@ -45,8 +49,8 @@ def _next_available_slug(db: Session, requested: str) -> str:
 )
 def create_tenant(
     tenant_data: TenantCreate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    current_user: CurrentUser,
+    db: DBSession,
 ) -> Tenant:
     if current_user.tenant_id is not None:
         raise HTTPException(
@@ -92,8 +96,8 @@ def create_tenant(
 
 @router.get("/current", response_model=TenantResponse)
 def current_tenant(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    current_user: CurrentUser,
+    db: DBSession,
 ) -> Tenant:
     if current_user.tenant_id is None:
         raise HTTPException(
