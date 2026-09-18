@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -7,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
-    full_name: Optional[str] = Field(default=None, max_length=200)
+    full_name: str | None = Field(default=None, max_length=200)
     language: str = Field(default="de", min_length=2, max_length=10)
 
 
@@ -21,10 +20,10 @@ class UserResponse(BaseModel):
 
     id: int
     email: EmailStr
-    full_name: Optional[str] = None
+    full_name: str | None = None
     role: str
     language: str
-    tenant_id: Optional[int] = None
+    tenant_id: int | None = None
     is_active: bool
     created_at: datetime
 
@@ -42,7 +41,7 @@ class DashboardResponse(BaseModel):
 
 class TenantCreate(BaseModel):
     name: str = Field(min_length=2, max_length=200)
-    slug: Optional[str] = Field(default=None, min_length=2, max_length=100)
+    slug: str | None = Field(default=None, min_length=2, max_length=100)
 
 
 class TenantResponse(BaseModel):
@@ -65,13 +64,13 @@ class TicketResponse(BaseModel):
     description: str
     status: str
     created_by_id: int
-    tenant_id: Optional[int] = None
+    tenant_id: int | None = None
     created_at: datetime
 
 
 class TicketListResponse(BaseModel):
-    tickets: List[TicketResponse]
+    tickets: list[TicketResponse]
 
 
 class ExportData(BaseModel):
-    lines: List[str]
+    lines: list[str]
