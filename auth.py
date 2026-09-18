@@ -18,6 +18,7 @@ router = APIRouter()
 security = HTTPBearer(auto_error=False)
 
 ALGORITHM = "HS256"
+TOKEN_TYPE = "bearer"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 ENVIRONMENT = os.getenv("SAFETY360_ENV", "development").lower()
 
@@ -91,7 +92,7 @@ def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
 
-    if credentials is None or credentials.scheme.lower() != "bearer":
+    if credentials is None or credentials.scheme.lower() != TOKEN_TYPE:
         raise auth_error
 
     try:
@@ -174,7 +175,7 @@ def login(login_data: LoginRequest, db: DBSession) -> TokenResponse:
     token = create_access_token(user)
     return TokenResponse(
         access_token=token,
-        token_type="bearer",
+        token_type=TOKEN_TYPE,
         expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
 
