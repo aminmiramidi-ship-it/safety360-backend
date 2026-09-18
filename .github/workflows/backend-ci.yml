@@ -51,6 +51,7 @@ jobs:
           required = {
               "alembic_version",
               "tenants",
+              "tenant_invitations",
               "users",
               "tickets",
               "documents",
