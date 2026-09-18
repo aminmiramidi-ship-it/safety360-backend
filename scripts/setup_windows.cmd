@@ -73,8 +73,8 @@ if exist "%REPO_DIR%\..\frontend\package.json" (
 echo.
 echo ============================================================
 echo Safety360 Setup abgeschlossen.
-echo Eventuell neu installierte Programme erst nach einem neuen CMD-Fenster
-necho vollstaendig im PATH verfuegbar.
+echo Eventuell neu installierte Programme sind erst nach einem neuen CMD-Fenster
+echo vollstaendig im PATH verfuegbar.
 echo ============================================================
 exit /b 0
 
