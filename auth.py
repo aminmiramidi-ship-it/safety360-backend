@@ -1,4 +1,6 @@
 import hashlib
+import hmac
+import math
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -13,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from audit_integrity import append_audit_event
+from auth_security_models import LoginThrottle
 from database import get_db
 from models import AuditLog, User
 from schemas import LoginRequest, TokenResponse, UserCreate, UserResponse
@@ -34,7 +37,31 @@ SESSION_COOKIE_SECURE = ENVIRONMENT == "production" or os.getenv(
     "SESSION_COOKIE_SECURE",
     "false",
 ).strip().lower() in {"1", "true", "yes", "on"}
+TRUST_PROXY_HEADERS = os.getenv("TRUST_PROXY_HEADERS", "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    try:
+        parsed = int(raw_value)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} muss eine Ganzzahl sein.") from exc
+    return max(minimum, min(parsed, maximum))
+
+
+LOGIN_WINDOW_SECONDS = _env_int("AUTH_LOGIN_WINDOW_SECONDS", 900, 60, 86400)
+ACCOUNT_FAILURE_LIMIT = _env_int("AUTH_ACCOUNT_FAILURE_LIMIT", 8, 3, 100)
+SOURCE_FAILURE_LIMIT = _env_int("AUTH_SOURCE_FAILURE_LIMIT", 30, 5, 500)
+ACCOUNT_COOLDOWN_SECONDS = _env_int("AUTH_ACCOUNT_COOLDOWN_SECONDS", 300, 30, 86400)
+SOURCE_COOLDOWN_SECONDS = _env_int("AUTH_SOURCE_COOLDOWN_SECONDS", 900, 30, 86400)
 
 if SESSION_COOKIE_SAMESITE not in {"lax", "strict", "none"}:
     raise RuntimeError("SESSION_COOKIE_SAMESITE muss lax, strict oder none sein.")
@@ -52,6 +79,12 @@ if not SECRET_KEY:
         "[WARNING] SAFETY360_SECRET_KEY ist nicht gesetzt. "
         "Für diese Development-Session wurde ein temporärer Schlüssel erzeugt."
     )
+
+AUTH_THROTTLE_KEY = os.getenv("AUTH_THROTTLE_KEY") or SECRET_KEY
+_DUMMY_PASSWORD_HASH = bcrypt.hashpw(
+    b"Safety360-dummy-password-check",
+    bcrypt.gensalt(),
+).decode("utf-8")
 
 DBSession = Annotated[Session, Depends(get_db)]
 BearerCredentials = Annotated[
@@ -76,11 +109,56 @@ def _hash_secret(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _fingerprint(kind: str, value: str) -> str:
+    return hmac.new(
+        AUTH_THROTTLE_KEY.encode("utf-8"),
+        f"{kind}:{value}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _client_source(request: Request) -> str:
+    if TRUST_PROXY_HEADERS:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        if forwarded:
+            candidate = forwarded.split(",", 1)[0].strip()
+            if candidate:
+                return candidate[:255]
+
+    if request.client and request.client.host:
+        return str(request.client.host)[:255]
+    return "unknown"
+
+
+def _login_fingerprints(normalized_email: str, request: Request) -> tuple[str, str]:
+    return (
+        _fingerprint("account", normalized_email),
+        _fingerprint("source", _client_source(request)),
+    )
+
+
 def _auth_error() -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Ungültige oder abgelaufene Anmeldung.",
         headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def _invalid_credentials_error() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="E-Mail-Adresse oder Passwort ist ungültig.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def _rate_limit_error(retry_after_seconds: int) -> HTTPException:
+    retry_after = max(1, retry_after_seconds)
+    return HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail="Zu viele Anmeldeversuche. Bitte später erneut versuchen.",
+        headers={"Retry-After": str(retry_after)},
     )
 
 
@@ -108,23 +186,194 @@ def verify_password(plain_password: str, password_hash: str) -> bool:
         return False
 
 
-def _authenticate_password(login_data: LoginRequest, db: Session) -> User:
+def _get_throttle(db: Session, key_type: str, key_hash: str) -> LoginThrottle | None:
+    return (
+        db.query(LoginThrottle)
+        .filter(
+            LoginThrottle.key_type == key_type,
+            LoginThrottle.key_hash == key_hash,
+        )
+        .with_for_update()
+        .first()
+    )
+
+
+def _refresh_throttle_window(throttle: LoginThrottle, now: datetime) -> None:
+    locked_until = _as_utc(throttle.locked_until)
+    if locked_until is not None and locked_until <= now:
+        throttle.failed_attempts = 0
+        throttle.window_started_at = now
+        throttle.locked_until = None
+        return
+
+    window_started = _as_utc(throttle.window_started_at) or now
+    if window_started + timedelta(seconds=LOGIN_WINDOW_SECONDS) <= now:
+        throttle.failed_attempts = 0
+        throttle.window_started_at = now
+        throttle.locked_until = None
+
+
+def _active_lock_seconds(throttle: LoginThrottle | None, now: datetime) -> int:
+    if throttle is None:
+        return 0
+    _refresh_throttle_window(throttle, now)
+    locked_until = _as_utc(throttle.locked_until)
+    if locked_until is None or locked_until <= now:
+        return 0
+    return max(1, math.ceil((locked_until - now).total_seconds()))
+
+
+def _check_login_allowed(
+    db: Session,
+    account_hash: str,
+    source_hash: str,
+    authentication_mode: str,
+) -> None:
+    now = _now()
+    account_throttle = _get_throttle(db, "account", account_hash)
+    source_throttle = _get_throttle(db, "source", source_hash)
+    retry_after = max(
+        _active_lock_seconds(account_throttle, now),
+        _active_lock_seconds(source_throttle, now),
+    )
+    if retry_after <= 0:
+        return
+
+    append_audit_event(
+        db,
+        tenant_id=None,
+        actor_user_id=None,
+        action="auth.login.blocked",
+        object_type="authentication_subject",
+        object_id=account_hash[:16],
+        outcome="blocked",
+        source="auth",
+        details={
+            "authentication_mode": authentication_mode,
+            "subject_fingerprint": account_hash[:16],
+            "source_fingerprint": source_hash[:16],
+            "retry_after_seconds": retry_after,
+        },
+    )
+    db.commit()
+    raise _rate_limit_error(retry_after)
+
+
+def _increment_throttle(
+    db: Session,
+    key_type: str,
+    key_hash: str,
+    failure_limit: int,
+    cooldown_seconds: int,
+    now: datetime,
+) -> tuple[LoginThrottle, int]:
+    throttle = _get_throttle(db, key_type, key_hash)
+    if throttle is None:
+        throttle = LoginThrottle(
+            key_type=key_type,
+            key_hash=key_hash,
+            failed_attempts=0,
+            window_started_at=now,
+        )
+        db.add(throttle)
+    else:
+        _refresh_throttle_window(throttle, now)
+
+    throttle.failed_attempts += 1
+    throttle.last_failed_at = now
+    throttle.updated_at = now
+
+    if throttle.failed_attempts >= failure_limit:
+        throttle.locked_until = now + timedelta(seconds=cooldown_seconds)
+        return throttle, cooldown_seconds
+    return throttle, 0
+
+
+def _record_failed_login(
+    db: Session,
+    *,
+    account_hash: str,
+    source_hash: str,
+    authentication_mode: str,
+) -> None:
+    now = _now()
+    _, account_retry = _increment_throttle(
+        db,
+        "account",
+        account_hash,
+        ACCOUNT_FAILURE_LIMIT,
+        ACCOUNT_COOLDOWN_SECONDS,
+        now,
+    )
+    _, source_retry = _increment_throttle(
+        db,
+        "source",
+        source_hash,
+        SOURCE_FAILURE_LIMIT,
+        SOURCE_COOLDOWN_SECONDS,
+        now,
+    )
+    retry_after = max(account_retry, source_retry)
+
+    append_audit_event(
+        db,
+        tenant_id=None,
+        actor_user_id=None,
+        action="auth.login.failed",
+        object_type="authentication_subject",
+        object_id=account_hash[:16],
+        outcome="failure",
+        source="auth",
+        details={
+            "authentication_mode": authentication_mode,
+            "subject_fingerprint": account_hash[:16],
+            "source_fingerprint": source_hash[:16],
+            "throttled": retry_after > 0,
+        },
+    )
+    db.commit()
+
+    if retry_after > 0:
+        raise _rate_limit_error(retry_after)
+    raise _invalid_credentials_error()
+
+
+def _reset_login_throttles(db: Session, account_hash: str, source_hash: str) -> None:
+    now = _now()
+    for key_type, key_hash in (("account", account_hash), ("source", source_hash)):
+        throttle = _get_throttle(db, key_type, key_hash)
+        if throttle is None:
+            continue
+        throttle.failed_attempts = 0
+        throttle.window_started_at = now
+        throttle.last_failed_at = None
+        throttle.locked_until = None
+        throttle.updated_at = now
+
+
+def _authenticate_password(
+    login_data: LoginRequest,
+    db: Session,
+    request: Request,
+    authentication_mode: str,
+) -> User:
     normalized_email = str(login_data.email).strip().lower()
+    account_hash, source_hash = _login_fingerprints(normalized_email, request)
+    _check_login_allowed(db, account_hash, source_hash, authentication_mode)
+
     user = db.query(User).filter(User.email == normalized_email).first()
+    password_hash = user.password_hash if user is not None else _DUMMY_PASSWORD_HASH
+    password_valid = verify_password(login_data.password, password_hash)
 
-    if user is None or not verify_password(login_data.password, user.password_hash):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="E-Mail-Adresse oder Passwort ist ungültig.",
-            headers={"WWW-Authenticate": "Bearer"},
+    if user is None or not password_valid or not user.is_active:
+        _record_failed_login(
+            db,
+            account_hash=account_hash,
+            source_hash=source_hash,
+            authentication_mode=authentication_mode,
         )
 
-    if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Dieses Benutzerkonto ist deaktiviert.",
-        )
-
+    _reset_login_throttles(db, account_hash, source_hash)
     return user
 
 
@@ -311,8 +560,8 @@ def register(user_data: UserCreate, db: DBSession) -> User:
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(login_data: LoginRequest, db: DBSession) -> TokenResponse:
-    user = _authenticate_password(login_data, db)
+def login(login_data: LoginRequest, request: Request, db: DBSession) -> TokenResponse:
+    user = _authenticate_password(login_data, db, request, "bearer")
     token = create_access_token(user)
     append_audit_event(
         db,
@@ -335,10 +584,11 @@ def login(login_data: LoginRequest, db: DBSession) -> TokenResponse:
 @router.post("/session/login", response_model=UserResponse)
 def browser_session_login(
     login_data: LoginRequest,
+    request: Request,
     response: Response,
     db: DBSession,
 ) -> User:
-    user = _authenticate_password(login_data, db)
+    user = _authenticate_password(login_data, db, request, "cookie")
     session_token = secrets.token_urlsafe(48)
     csrf_token = secrets.token_urlsafe(32)
     expires_at = _now() + timedelta(minutes=SESSION_TTL_MINUTES)
@@ -358,6 +608,16 @@ def browser_session_login(
             user_id=user.id,
             tenant_id=user.tenant_id,
         )
+    )
+    append_audit_event(
+        db,
+        tenant_id=user.tenant_id,
+        actor_user_id=user.id,
+        action="auth.login.succeeded",
+        object_type="user",
+        object_id=user.id,
+        source="auth",
+        details={"authentication_mode": "cookie"},
     )
     append_audit_event(
         db,

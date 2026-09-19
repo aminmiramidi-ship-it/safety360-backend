@@ -4,6 +4,7 @@ from alembic import context
 from sqlalchemy import create_engine, pool
 
 import audit_models  # noqa: F401
+import auth_security_models  # noqa: F401
 import content_impact_models  # noqa: F401
 import dguv_catalog_models  # noqa: F401
 import identity_models  # noqa: F401
@@ -51,8 +52,8 @@ def run_migrations_online() -> None:
     with connectable.connect() as connection:
         context.configure(
             connection=connection,
-            target_metadata=target_metadata,
             compare_type=True,
+            target_metadata=target_metadata,
         )
 
         with context.begin_transaction():
