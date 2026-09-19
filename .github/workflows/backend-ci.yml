@@ -96,6 +96,7 @@ jobs:
               "learning_artifacts",
               "content_dependencies",
               "content_impact_assessments",
+              "realtime_access_tickets",
               "audit_log",
           }
           missing = required - tables
@@ -105,6 +106,11 @@ jobs:
           pack_columns = {column["name"] for column in inspector.get_columns("learning_content_packs")}
           if "currentness_status" not in pack_columns:
               raise SystemExit("Missing learning_content_packs.currentness_status")
+
+          ticket_columns = {column["name"] for column in inspector.get_columns("realtime_access_tickets")}
+          expected_ticket_columns = {"token_hash", "user_id", "tenant_id", "expires_at", "used_at"}
+          if not expected_ticket_columns.issubset(ticket_columns):
+              raise SystemExit("Realtime ticket schema is incomplete")
 
           print("Migration tables verified:", sorted(tables))
           PY
