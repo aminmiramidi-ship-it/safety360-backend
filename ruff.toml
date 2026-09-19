@@ -1,0 +1,6 @@
+# Temporary compatibility rules for legacy FastAPI modules.
+# New and actively modified endpoints should prefer typing.Annotated dependencies.
+[lint.per-file-ignores]
+"assistant_api.py" = ["I001"]
+"main.py" = ["I001"]
+"translation_api.py" = ["B008"]
