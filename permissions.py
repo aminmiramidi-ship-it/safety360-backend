@@ -18,6 +18,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "agents.feedback",
         "ims.read",
         "regulatory.read",
+        "industry.read",
     },
     "viewer": {
         "dashboard.read",
@@ -29,6 +30,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "agents.use",
         "ims.read",
         "regulatory.read",
+        "industry.read",
     },
     "manager": {
         "dashboard.read",
@@ -48,6 +50,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "ims.generate",
         "privacy.read",
         "regulatory.read",
+        "industry.read",
     },
     "hse_manager": {
         "dashboard.read",
@@ -70,6 +73,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "ims.approve",
         "privacy.read",
         "regulatory.read",
+        "industry.read",
     },
     "document_controller": {
         "dashboard.read",
@@ -90,6 +94,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "ims.approve",
         "privacy.read",
         "regulatory.read",
+        "industry.read",
     },
     "tenant_admin": {
         "dashboard.read",
@@ -119,6 +124,8 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "privacy.manage",
         "privacy.dsar.manage",
         "regulatory.read",
+        "industry.read",
+        "industry.profile.manage",
     },
     "admin": {"*"},
 }
