@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Annotated
 
 from cryptography.fernet import Fernet, InvalidToken
-from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile, WebSocket, status
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile, status
 from fastapi.background import BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -35,6 +35,7 @@ from occupational_health_api import router as occupational_health_router
 from permissions import require_permission
 from platform_api import router as platform_router
 from privacy_api import router as privacy_router
+from realtime_api import router as realtime_router
 from regulatory_api import router as regulatory_router
 from schemas import (
     DashboardResponse,
@@ -48,7 +49,7 @@ from sso_api import router as sso_router
 from tenants import router as tenant_router
 from translation_api import router as translation_router
 
-APP_VERSION = "2.8.0"
+APP_VERSION = "2.9.0"
 ENVIRONMENT = os.getenv("SAFETY360_ENV", "development").lower()
 MAX_IMPORT_BYTES = int(os.getenv("MAX_IMPORT_BYTES", str(20 * 1024 * 1024)))
 
@@ -90,8 +91,8 @@ app = FastAPI(
         "Arbeitsschutz-, Umwelt-, Energie- und Nachhaltigkeitsrecht, branchenbezogene Tätigkeits- und "
         "Prozessintelligenz, integrierte Content-/Training-Factory mit Impact-/Revisionssteuerung, "
         "DGUV-basierte deutsche Arbeitsschutzgrundlagen mit lizenz-/rechtebewusster Quellen-Governance, "
-        "Dokumente, Ablage, Tickets, KI, Übersetzung, adaptive Agent-Orchestrierung, Enterprise-SSO und "
-        "Plattformdienste."
+        "Dokumente, Ablage, Tickets, KI, Übersetzung, adaptive Agent-Orchestrierung, Enterprise-SSO, "
+        "ticket-gesicherte Realtime-Verbindungen und Plattformdienste."
     ),
 )
 
@@ -155,6 +156,7 @@ app.include_router(content_impact_router, prefix="/content-impact", tags=["Conte
 app.include_router(integration_router, prefix="/integrations", tags=["Enterprise Integrations"])
 app.include_router(occupational_health_router, prefix="/occupational-health", tags=["Occupational Health Autopilot"])
 app.include_router(privacy_router, prefix="/privacy", tags=["Privacy & GDPR Governance"])
+app.include_router(realtime_router, prefix="/realtime", tags=["Secure Realtime"])
 app.include_router(regulatory_router, prefix="/regulatory", tags=["Regulatory Intelligence"])
 app.include_router(
     legal_graph_router,
@@ -389,13 +391,6 @@ async def import_pdf(
 def admin_db(current_user: CurrentUser):
     require_permission(current_user, "*")
     return {"tables": inspect(engine).get_table_names()}
-
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    await websocket.send_text("Connected to Safety360 WebSocket")
-    await websocket.close()
 
 
 if __name__ == "__main__":

@@ -20,6 +20,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "regulatory.read",
         "industry.read",
         "legal_graph.read",
+        "realtime.connect",
         "occupational_health.read_own",
     },
     "viewer": {
@@ -35,6 +36,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "industry.read",
         "legal_graph.read",
         "content.read",
+        "realtime.connect",
     },
     "manager": {
         "dashboard.read",
@@ -59,6 +61,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "content.read",
         "content.create",
         "content.generate",
+        "realtime.connect",
         "occupational_health.read",
     },
     "hse_manager": {
@@ -92,6 +95,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "content.approve",
         "content.manage_dependencies",
         "content.scan_impacts",
+        "realtime.connect",
         "occupational_health.read",
         "occupational_health.manage",
         "occupational_health.schedule",
@@ -109,6 +113,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "regulatory.read",
         "legal_graph.read",
         "content.read",
+        "realtime.connect",
         "occupational_health.read",
         "occupational_health.schedule",
         "occupational_health.clinical",
@@ -141,6 +146,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "content.approve",
         "content.manage_dependencies",
         "content.scan_impacts",
+        "realtime.connect",
         "integrations.read",
     },
     "tenant_admin": {
@@ -182,6 +188,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "content.approve",
         "content.manage_dependencies",
         "content.scan_impacts",
+        "realtime.connect",
         "occupational_health.read",
         "occupational_health.manage",
         "occupational_health.schedule",

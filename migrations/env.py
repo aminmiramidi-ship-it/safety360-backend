@@ -14,6 +14,7 @@ import legal_graph_models  # noqa: F401
 import models  # noqa: F401
 import occupational_health_models  # noqa: F401
 import privacy_models  # noqa: F401
+import realtime_models  # noqa: F401
 import regulatory_models  # noqa: F401
 from database import DATABASE_URL, Base
 
