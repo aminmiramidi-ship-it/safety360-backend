@@ -7,6 +7,7 @@ import identity_models  # noqa: F401
 import ingestion_models  # noqa: F401
 import models  # noqa: F401
 import privacy_models  # noqa: F401
+import regulatory_models  # noqa: F401
 from database import DATABASE_URL, Base
 
 config = context.config
