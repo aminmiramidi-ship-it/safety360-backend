@@ -48,7 +48,8 @@ jobs:
           from sqlalchemy import create_engine, inspect
 
           engine = create_engine("sqlite:///./migration_test.db")
-          tables = set(inspect(engine).get_table_names())
+          inspector = inspect(engine)
+          tables = set(inspector.get_table_names())
           required = {
               "alembic_version",
               "tenants",
@@ -93,11 +94,18 @@ jobs:
               "occupational_health_notifications",
               "learning_content_packs",
               "learning_artifacts",
+              "content_dependencies",
+              "content_impact_assessments",
               "audit_log",
           }
           missing = required - tables
           if missing:
               raise SystemExit(f"Missing migrated tables: {sorted(missing)}")
+
+          pack_columns = {column["name"] for column in inspector.get_columns("learning_content_packs")}
+          if "currentness_status" not in pack_columns:
+              raise SystemExit("Missing learning_content_packs.currentness_status")
+
           print("Migration tables verified:", sorted(tables))
           PY
 
