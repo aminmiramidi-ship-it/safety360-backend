@@ -98,6 +98,8 @@ jobs:
               "content_impact_assessments",
               "realtime_access_tickets",
               "browser_sessions",
+              "audit_chain_heads",
+              "audit_events",
               "audit_log",
           }
           missing = required - tables
@@ -124,6 +126,27 @@ jobs:
           }
           if not expected_session_columns.issubset(session_columns):
               raise SystemExit("Browser session schema is incomplete")
+
+          audit_columns = {column["name"] for column in inspector.get_columns("audit_events")}
+          expected_audit_columns = {
+              "event_id",
+              "scope_key",
+              "sequence",
+              "tenant_id",
+              "actor_user_id",
+              "action",
+              "object_type",
+              "object_id",
+              "outcome",
+              "source",
+              "details_json",
+              "previous_hash",
+              "record_hash",
+              "key_id",
+              "created_at",
+          }
+          if not expected_audit_columns.issubset(audit_columns):
+              raise SystemExit("Structured audit schema is incomplete")
 
           print("Migration tables verified:", sorted(tables))
           PY
