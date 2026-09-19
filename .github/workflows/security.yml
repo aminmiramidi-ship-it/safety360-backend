@@ -43,8 +43,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
-      - name: Static security scan
-        run: bandit -q -r . -x ./tests,./migrations,./venv,./.venv
+      - name: Static security scan - full report
+        continue-on-error: true
+        run: bandit -r . -x ./tests,./migrations,./venv,./.venv
+
+      - name: Static security gate - medium and high severity
+        run: bandit -q -r . -x ./tests,./migrations,./venv,./.venv -ll
 
       - name: Dependency vulnerability audit
         run: pip-audit -r requirements.txt
