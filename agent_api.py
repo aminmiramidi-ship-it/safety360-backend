@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from dataclasses import dataclass
@@ -11,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from auth import get_current_user
 from database import get_db
-from models import AuditLog, User
+from models import AgentFeedback, AgentRun, AuditLog, User
 from permissions import require_permission
 
 router = APIRouter()
@@ -246,43 +247,21 @@ def _require_tenant(user: User) -> int:
     return user.tenant_id
 
 
-def _feedback_rows(db: Session, tenant_id: int) -> list[AuditLog]:
-    return (
-        db.query(AuditLog)
-        .filter(
-            AuditLog.tenant_id == tenant_id,
-            AuditLog.event.like("agent_feedback:%"),
-        )
-        .order_by(AuditLog.created_at.desc())
-        .limit(500)
-        .all()
-    )
-
-
-def _parse_feedback(event: str) -> dict[str, object] | None:
-    if not event.startswith("agent_feedback:"):
-        return None
-    try:
-        payload = json.loads(event.removeprefix("agent_feedback:"))
-    except (json.JSONDecodeError, TypeError):
-        return None
-    return payload if isinstance(payload, dict) else None
-
-
 def _adaptation_map(db: Session, tenant_id: int) -> dict[str, AgentAdaptationItem]:
     ratings: dict[str, list[int]] = {agent.id: [] for agent in AGENTS}
     outcomes: dict[str, list[str]] = {agent.id: [] for agent in AGENTS}
 
-    for row in _feedback_rows(db, tenant_id):
-        payload = _parse_feedback(row.event)
-        if not payload:
-            continue
-        agent_id = str(payload.get("agent_id", ""))
-        rating = payload.get("rating")
-        outcome = str(payload.get("outcome", ""))
-        if agent_id in ratings and isinstance(rating, int) and 1 <= rating <= 5:
-            ratings[agent_id].append(rating)
-            outcomes[agent_id].append(outcome)
+    rows = (
+        db.query(AgentFeedback)
+        .filter(AgentFeedback.tenant_id == tenant_id)
+        .order_by(AgentFeedback.updated_at.desc())
+        .limit(500)
+        .all()
+    )
+    for row in rows:
+        if row.agent_id in ratings and 1 <= row.rating <= 5:
+            ratings[row.agent_id].append(row.rating)
+            outcomes[row.agent_id].append(row.outcome)
 
     result: dict[str, AgentAdaptationItem] = {}
     for agent in AGENTS:
@@ -298,7 +277,7 @@ def _adaptation_map(db: Session, tenant_id: int) -> dict[str, AgentAdaptationIte
 
         average = sum(values) / len(values)
         adjustment = round((average - 3.0) * 5)
-        recent_outcomes = outcomes[agent.id][-20:]
+        recent_outcomes = outcomes[agent.id][:20]
         adjustment += min(2, recent_outcomes.count("completed"))
         adjustment -= min(2, recent_outcomes.count("failed"))
         adjustment = max(-10, min(10, adjustment))
@@ -396,14 +375,28 @@ def create_plan(
 
     tasks.sort(key=lambda item: (-item.priority, item.agent_id))
     run_id = str(uuid.uuid4())
+    selected_agents = [task.agent_id for task in tasks]
+    objective_hash = hashlib.sha256(
+        f"{data.objective}\n{data.context or ''}".encode("utf-8")
+    ).hexdigest()
 
+    db.add(
+        AgentRun(
+            run_id=run_id,
+            tenant_id=tenant_id,
+            created_by_id=current_user.id,
+            objective_hash=objective_hash,
+            selected_agents_json=json.dumps(selected_agents, separators=(",", ":")),
+            learning_mode="feedback_and_outcome_adaptation",
+        )
+    )
     db.add(
         AuditLog(
             event="agent_plan_created:"
             + json.dumps(
                 {
                     "run_id": run_id,
-                    "agents": [task.agent_id for task in tasks],
+                    "agents": selected_agents,
                     "learning_mode": "feedback_and_outcome_adaptation",
                 },
                 separators=(",", ":"),
@@ -436,16 +429,70 @@ def submit_feedback(
     require_permission(current_user, "agents.feedback")
     tenant_id = _require_tenant(current_user)
 
-    payload = {
-        "run_id": data.run_id,
-        "agent_id": data.agent_id,
-        "outcome": data.outcome,
-        "rating": data.rating,
-        "workflow": data.workflow.strip().lower(),
-    }
+    run = (
+        db.query(AgentRun)
+        .filter(
+            AgentRun.run_id == data.run_id,
+            AgentRun.tenant_id == tenant_id,
+        )
+        .first()
+    )
+    if run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agentenlauf wurde für diesen Mandanten nicht gefunden.",
+        )
+
+    try:
+        selected_agents = set(json.loads(run.selected_agents_json))
+    except (json.JSONDecodeError, TypeError):
+        selected_agents = set()
+    if data.agent_id not in selected_agents:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Für diesen Agenten existiert in dem angegebenen Lauf keine Aufgabe.",
+        )
+
+    workflow = data.workflow.strip().lower()
+    feedback = (
+        db.query(AgentFeedback)
+        .filter(
+            AgentFeedback.tenant_id == tenant_id,
+            AgentFeedback.run_id == data.run_id,
+            AgentFeedback.agent_id == data.agent_id,
+        )
+        .first()
+    )
+    if feedback is None:
+        feedback = AgentFeedback(
+            tenant_id=tenant_id,
+            run_id=data.run_id,
+            agent_id=data.agent_id,
+            outcome=data.outcome,
+            rating=data.rating,
+            workflow=workflow,
+            created_by_id=current_user.id,
+        )
+        db.add(feedback)
+    else:
+        feedback.outcome = data.outcome
+        feedback.rating = data.rating
+        feedback.workflow = workflow
+        feedback.created_by_id = current_user.id
+
     db.add(
         AuditLog(
-            event="agent_feedback:" + json.dumps(payload, separators=(",", ":"), sort_keys=True),
+            event="agent_feedback_recorded:"
+            + json.dumps(
+                {
+                    "run_id": data.run_id,
+                    "agent_id": data.agent_id,
+                    "outcome": data.outcome,
+                    "rating": data.rating,
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
             user_id=current_user.id,
             tenant_id=tenant_id,
         )
