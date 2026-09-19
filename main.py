@@ -19,12 +19,15 @@ from auth import get_current_user
 from auth import router as auth_router
 from billing_api import router as billing_router
 from database import Base, engine, get_db
+from dguv_v2_api import router as dguv_v2_router
 from documents import router as document_router
 from files_api import router as file_router
 from ims_api import router as ims_router
 from models import AuditLog, Ticket, User
 from permissions import require_permission
 from platform_api import router as platform_router
+from privacy_api import router as privacy_router
+from regulatory_api import router as regulatory_router
 from schemas import (
     DashboardResponse,
     ExportData,
@@ -37,7 +40,7 @@ from sso_api import router as sso_router
 from tenants import router as tenant_router
 from translation_api import router as translation_router
 
-APP_VERSION = "1.8.0"
+APP_VERSION = "2.1.0"
 ENVIRONMENT = os.getenv("SAFETY360_ENV", "development").lower()
 MAX_IMPORT_BYTES = int(os.getenv("MAX_IMPORT_BYTES", str(20 * 1024 * 1024)))
 
@@ -74,8 +77,9 @@ app = FastAPI(
     title="Safety360 API",
     version=APP_VERSION,
     description=(
-        "Safety360 Backend für HSE, IMS, Dokumente, Ablage, Tickets, KI, Übersetzung, "
-        "adaptive Agent-Orchestrierung, Enterprise-SSO und Plattformdienste."
+        "Safety360 Backend für HSE, IMS, Datenschutz-Governance, Regulatory Intelligence, "
+        "DGUV-basierte deutsche Arbeitsschutzgrundlagen, Dokumente, Ablage, Tickets, KI, "
+        "Übersetzung, adaptive Agent-Orchestrierung, Enterprise-SSO und Plattformdienste."
     ),
 )
 
@@ -133,6 +137,13 @@ app.include_router(assistant_router, prefix="/assistant", tags=["Assistant"])
 app.include_router(translation_router, prefix="/translation", tags=["Translation"])
 app.include_router(agent_router, prefix="/agents", tags=["AI Agent Autopilot"])
 app.include_router(ims_router, prefix="/ims", tags=["IMS Orchestration"])
+app.include_router(privacy_router, prefix="/privacy", tags=["Privacy & GDPR Governance"])
+app.include_router(regulatory_router, prefix="/regulatory", tags=["Regulatory Intelligence"])
+app.include_router(
+    dguv_v2_router,
+    prefix="/regulatory/de/dguv-v2-2024",
+    tags=["DE Regulatory Baseline - DGUV Vorschrift 2"],
+)
 app.include_router(billing_router, prefix="/billing", tags=["Billing"])
 app.include_router(platform_router, prefix="/platform", tags=["Platform"])
 
