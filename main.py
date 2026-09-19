@@ -26,6 +26,7 @@ from files_api import router as file_router
 from ims_api import router as ims_router
 from industry_api import router as industry_router
 from legal_baseline_api import router as legal_baseline_router
+from legal_graph_api import router as legal_graph_router
 from models import AuditLog, Ticket, User
 from permissions import require_permission
 from platform_api import router as platform_router
@@ -43,7 +44,7 @@ from sso_api import router as sso_router
 from tenants import router as tenant_router
 from translation_api import router as translation_router
 
-APP_VERSION = "2.4.0"
+APP_VERSION = "2.5.0"
 ENVIRONMENT = os.getenv("SAFETY360_ENV", "development").lower()
 MAX_IMPORT_BYTES = int(os.getenv("MAX_IMPORT_BYTES", str(20 * 1024 * 1024)))
 
@@ -81,10 +82,10 @@ app = FastAPI(
     version=APP_VERSION,
     description=(
         "Safety360 Backend für HSE, IMS, Datenschutz-Governance, Regulatory Intelligence, "
-        "Arbeitsschutz-, Umwelt-, Energie- und Nachhaltigkeitsrecht, branchenbezogene Tätigkeits- "
-        "und Prozessintelligenz, DGUV-basierte deutsche Arbeitsschutzgrundlagen mit lizenz-/" 
-        "rechtebewusster Quellen-Governance, Dokumente, Ablage, Tickets, KI, Übersetzung, "
-        "adaptive Agent-Orchestrierung, Enterprise-SSO und Plattformdienste."
+        "Legal Knowledge Graph und Anwendbarkeitsmatrix, Arbeitsschutz-, Umwelt-, Energie- und "
+        "Nachhaltigkeitsrecht, branchenbezogene Tätigkeits- und Prozessintelligenz, DGUV-basierte "
+        "deutsche Arbeitsschutzgrundlagen mit lizenz-/rechtebewusster Quellen-Governance, Dokumente, "
+        "Ablage, Tickets, KI, Übersetzung, adaptive Agent-Orchestrierung, Enterprise-SSO und Plattformdienste."
     ),
 )
 
@@ -145,6 +146,11 @@ app.include_router(ims_router, prefix="/ims", tags=["IMS Orchestration"])
 app.include_router(industry_router, prefix="/industry", tags=["Industry Intelligence"])
 app.include_router(privacy_router, prefix="/privacy", tags=["Privacy & GDPR Governance"])
 app.include_router(regulatory_router, prefix="/regulatory", tags=["Regulatory Intelligence"])
+app.include_router(
+    legal_graph_router,
+    prefix="/regulatory/legal-graph",
+    tags=["Legal Knowledge Graph & Applicability"],
+)
 app.include_router(
     legal_baseline_router,
     prefix="/regulatory/de-eu/baseline",
