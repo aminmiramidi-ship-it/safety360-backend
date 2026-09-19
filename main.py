@@ -26,6 +26,7 @@ from models import AuditLog, Ticket, User
 from permissions import require_permission
 from platform_api import router as platform_router
 from privacy_api import router as privacy_router
+from regulatory_api import router as regulatory_router
 from schemas import (
     DashboardResponse,
     ExportData,
@@ -38,7 +39,7 @@ from sso_api import router as sso_router
 from tenants import router as tenant_router
 from translation_api import router as translation_router
 
-APP_VERSION = "1.9.0"
+APP_VERSION = "2.0.0"
 ENVIRONMENT = os.getenv("SAFETY360_ENV", "development").lower()
 MAX_IMPORT_BYTES = int(os.getenv("MAX_IMPORT_BYTES", str(20 * 1024 * 1024)))
 
@@ -75,8 +76,9 @@ app = FastAPI(
     title="Safety360 API",
     version=APP_VERSION,
     description=(
-        "Safety360 Backend für HSE, IMS, Datenschutz-Governance, Dokumente, Ablage, Tickets, "
-        "KI, Übersetzung, adaptive Agent-Orchestrierung, Enterprise-SSO und Plattformdienste."
+        "Safety360 Backend für HSE, IMS, Datenschutz-Governance, Regulatory Intelligence, "
+        "Dokumente, Ablage, Tickets, KI, Übersetzung, adaptive Agent-Orchestrierung, "
+        "Enterprise-SSO und Plattformdienste."
     ),
 )
 
@@ -135,6 +137,7 @@ app.include_router(translation_router, prefix="/translation", tags=["Translation
 app.include_router(agent_router, prefix="/agents", tags=["AI Agent Autopilot"])
 app.include_router(ims_router, prefix="/ims", tags=["IMS Orchestration"])
 app.include_router(privacy_router, prefix="/privacy", tags=["Privacy & GDPR Governance"])
+app.include_router(regulatory_router, prefix="/regulatory", tags=["Regulatory Intelligence"])
 app.include_router(billing_router, prefix="/billing", tags=["Billing"])
 app.include_router(platform_router, prefix="/platform", tags=["Platform"])
 
