@@ -7,9 +7,11 @@ on:
       - main
       - safety360-phase1-auth
       - safety360-platform-core
+      - safety360-i18n-core
   pull_request:
     branches:
       - main
+      - safety360-platform-core
 
 permissions:
   contents: read
