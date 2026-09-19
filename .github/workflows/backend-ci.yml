@@ -65,6 +65,7 @@ jobs:
               "tickets",
               "documents",
               "stored_files",
+              "file_ingestion_records",
               "assistant_threads",
               "assistant_messages",
               "tenant_subscriptions",
