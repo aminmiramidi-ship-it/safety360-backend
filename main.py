@@ -18,6 +18,7 @@ from assistant_api import router as assistant_router
 from auth import get_current_user
 from auth import router as auth_router
 from billing_api import router as billing_router
+from content_impact_api import router as content_impact_router
 from database import Base, engine, get_db
 from dguv_catalog_api import router as dguv_catalog_router
 from dguv_v2_api import router as dguv_v2_router
@@ -47,7 +48,7 @@ from sso_api import router as sso_router
 from tenants import router as tenant_router
 from translation_api import router as translation_router
 
-APP_VERSION = "2.7.0"
+APP_VERSION = "2.8.0"
 ENVIRONMENT = os.getenv("SAFETY360_ENV", "development").lower()
 MAX_IMPORT_BYTES = int(os.getenv("MAX_IMPORT_BYTES", str(20 * 1024 * 1024)))
 
@@ -87,9 +88,10 @@ app = FastAPI(
         "Safety360 Backend für HSE, IMS, Datenschutz-Governance, Regulatory Intelligence, "
         "Legal Knowledge Graph und Anwendbarkeitsmatrix, Arbeitsmedizin-Autopilot, Enterprise-Integrationen, "
         "Arbeitsschutz-, Umwelt-, Energie- und Nachhaltigkeitsrecht, branchenbezogene Tätigkeits- und "
-        "Prozessintelligenz, integrierte Content-/Training-Factory, DGUV-basierte deutsche Arbeitsschutzgrundlagen "
-        "mit lizenz-/rechtebewusster Quellen-Governance, Dokumente, Ablage, Tickets, KI, Übersetzung, adaptive "
-        "Agent-Orchestrierung, Enterprise-SSO und Plattformdienste."
+        "Prozessintelligenz, integrierte Content-/Training-Factory mit Impact-/Revisionssteuerung, "
+        "DGUV-basierte deutsche Arbeitsschutzgrundlagen mit lizenz-/rechtebewusster Quellen-Governance, "
+        "Dokumente, Ablage, Tickets, KI, Übersetzung, adaptive Agent-Orchestrierung, Enterprise-SSO und "
+        "Plattformdienste."
     ),
 )
 
@@ -149,6 +151,7 @@ app.include_router(agent_router, prefix="/agents", tags=["AI Agent Autopilot"])
 app.include_router(ims_router, prefix="/ims", tags=["IMS Orchestration"])
 app.include_router(industry_router, prefix="/industry", tags=["Industry Intelligence"])
 app.include_router(learning_content_router, prefix="/content-factory", tags=["Content & Training Factory"])
+app.include_router(content_impact_router, prefix="/content-impact", tags=["Content Impact & Revision Engine"])
 app.include_router(integration_router, prefix="/integrations", tags=["Enterprise Integrations"])
 app.include_router(occupational_health_router, prefix="/occupational-health", tags=["Occupational Health Autopilot"])
 app.include_router(privacy_router, prefix="/privacy", tags=["Privacy & GDPR Governance"])
