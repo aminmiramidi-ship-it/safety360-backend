@@ -8,7 +8,6 @@ from audit_integrity import append_audit_event
 from audit_models import AuditEvent
 from database import SessionLocal
 from main import app
-from models import User
 
 client = TestClient(app)
 
