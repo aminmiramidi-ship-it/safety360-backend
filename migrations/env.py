@@ -8,6 +8,7 @@ import identity_models  # noqa: F401
 import industry_models  # noqa: F401
 import ingestion_models  # noqa: F401
 import integration_models  # noqa: F401
+import learning_content_models  # noqa: F401
 import legal_graph_models  # noqa: F401
 import models  # noqa: F401
 import occupational_health_models  # noqa: F401

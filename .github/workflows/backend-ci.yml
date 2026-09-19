@@ -91,6 +91,8 @@ jobs:
               "occupational_health_appointments",
               "occupational_health_evidence",
               "occupational_health_notifications",
+              "learning_content_packs",
+              "learning_artifacts",
               "audit_log",
           }
           missing = required - tables
