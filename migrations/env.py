@@ -4,6 +4,7 @@ from alembic import context
 from sqlalchemy import create_engine, pool
 
 import identity_models  # noqa: F401
+import industry_models  # noqa: F401
 import ingestion_models  # noqa: F401
 import models  # noqa: F401
 import privacy_models  # noqa: F401
