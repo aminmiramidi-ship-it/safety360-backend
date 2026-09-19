@@ -20,7 +20,6 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "regulatory.read",
         "industry.read",
         "legal_graph.read",
-        "content.read",
         "occupational_health.read_own",
     },
     "viewer": {
