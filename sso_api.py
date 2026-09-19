@@ -14,12 +14,19 @@ import jwt
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
-from jwt import InvalidTokenError, PyJWK
+from jwt import PyJWK
+from jwt.exceptions import InvalidTokenError, PyJWKError
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from auth import ACCESS_TOKEN_EXPIRE_MINUTES, TOKEN_TYPE, create_access_token, get_current_user, hash_password
+from auth import (
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+    TOKEN_TYPE,
+    create_access_token,
+    get_current_user,
+    hash_password,
+)
 from database import get_db
 from identity_models import FederatedIdentity, SSOExchangeCode, TenantIdentityProvider
 from models import AuditLog, Tenant, User
@@ -35,7 +42,10 @@ SSO_COOKIE_NAME = "safety360_sso_tx"
 SSO_TRANSACTION_TTL_SECONDS = int(os.getenv("SSO_TRANSACTION_TTL_SECONDS", "300"))
 SSO_EXCHANGE_TTL_SECONDS = int(os.getenv("SSO_EXCHANGE_TTL_SECONDS", "60"))
 SSO_HTTP_TIMEOUT_SECONDS = float(os.getenv("SSO_HTTP_TIMEOUT_SECONDS", "8"))
-SSO_CALLBACK_URL = os.getenv("SSO_CALLBACK_URL", "http://127.0.0.1:8000/auth/sso/callback").strip()
+SSO_CALLBACK_URL = os.getenv(
+    "SSO_CALLBACK_URL",
+    "http://127.0.0.1:8000/auth/sso/callback",
+).strip()
 SSO_FRONTEND_CALLBACK_URL = os.getenv(
     "SSO_FRONTEND_CALLBACK_URL",
     "http://127.0.0.1:5173/sso/callback",
@@ -53,7 +63,9 @@ if not _SECRET_KEY:
         raise RuntimeError("SAFETY360_SECRET_KEY muss in Produktion für SSO gesetzt sein.")
     _SECRET_KEY = secrets.token_urlsafe(64)
 
-_TRANSACTION_KEY = base64.urlsafe_b64encode(hashlib.sha256(_SECRET_KEY.encode("utf-8")).digest())
+_TRANSACTION_KEY = base64.urlsafe_b64encode(
+    hashlib.sha256(_SECRET_KEY.encode("utf-8")).digest()
+)
 _TRANSACTION_FERNET = Fernet(_TRANSACTION_KEY)
 
 
@@ -114,13 +126,22 @@ def _as_utc(value: datetime) -> datetime:
 def _normalize_issuer(value: str) -> str:
     issuer = value.strip().rstrip("/")
     parsed = urlparse(issuer)
-    allow_http_dev = ENVIRONMENT != "production" and parsed.hostname in {"127.0.0.1", "localhost"}
+    allow_http_dev = (
+        ENVIRONMENT != "production"
+        and parsed.hostname in {"127.0.0.1", "localhost"}
+    )
     if parsed.scheme != "https" and not allow_http_dev:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="SSO-Issuer muss HTTPS verwenden.",
         )
-    if not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+    if (
+        not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+    ):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="SSO-Issuer ist ungültig.",
@@ -141,7 +162,10 @@ def _normalize_issuer(value: str) -> str:
 
 def _validate_callback_url(value: str, setting_name: str) -> str:
     parsed = urlparse(value)
-    allow_http_dev = ENVIRONMENT != "production" and parsed.hostname in {"127.0.0.1", "localhost"}
+    allow_http_dev = (
+        ENVIRONMENT != "production"
+        and parsed.hostname in {"127.0.0.1", "localhost"}
+    )
     if parsed.scheme != "https" and not allow_http_dev:
         raise RuntimeError(f"{setting_name} muss HTTPS verwenden.")
     if not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
@@ -156,7 +180,10 @@ def _validate_secret_env(value: str | None) -> str | None:
     if not normalized.startswith(SSO_SECRET_ENV_PREFIX):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"SSO-Client-Secrets dürfen nur über Umgebungsvariablen mit Präfix {SSO_SECRET_ENV_PREFIX} referenziert werden.",
+            detail=(
+                "SSO-Client-Secrets dürfen nur über Umgebungsvariablen mit Präfix "
+                f"{SSO_SECRET_ENV_PREFIX} referenziert werden."
+            ),
         )
     if not normalized.replace("_", "").isalnum() or normalized.upper() != normalized:
         raise HTTPException(
@@ -188,8 +215,12 @@ def _provider_domains(provider: TenantIdentityProvider) -> list[str]:
     return [str(item).lower() for item in parsed if isinstance(item, str)]
 
 
-def _serialize_provider(provider: TenantIdentityProvider) -> SSOProviderConfigResponse:
-    secret_configured = bool(provider.client_secret_env and os.getenv(provider.client_secret_env))
+def _serialize_provider(
+    provider: TenantIdentityProvider,
+) -> SSOProviderConfigResponse:
+    secret_configured = bool(
+        provider.client_secret_env and os.getenv(provider.client_secret_env)
+    )
     return SSOProviderConfigResponse(
         id=provider.id,
         tenant_id=provider.tenant_id,
@@ -209,26 +240,37 @@ def _serialize_provider(provider: TenantIdentityProvider) -> SSOProviderConfigRe
 def _tenant_admin_id(current_user: User) -> int:
     require_permission(current_user, "sso.manage")
     if current_user.tenant_id is None:
-        raise HTTPException(status_code=409, detail="Benutzer ist keinem Mandanten zugeordnet.")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Benutzer ist keinem Mandanten zugeordnet.",
+        )
     return current_user.tenant_id
 
 
-def _same_origin(reference: str, candidate: str) -> bool:
-    left = urlparse(reference)
-    right = urlparse(candidate)
-    return (left.scheme, left.hostname, left.port) == (right.scheme, right.hostname, right.port)
+def _origin(value: str) -> tuple[str, str | None, int | None]:
+    parsed = urlparse(value)
+    return parsed.scheme, parsed.hostname, parsed.port
 
 
 def _validate_provider_endpoint(issuer: str, endpoint: str, label: str) -> str:
     parsed = urlparse(endpoint)
     if parsed.scheme not in {"https", "http"} or not parsed.hostname:
-        raise HTTPException(status_code=502, detail=f"OIDC-{label} ist ungültig.")
-    if ENVIRONMENT == "production" and parsed.scheme != "https":
-        raise HTTPException(status_code=502, detail=f"OIDC-{label} verwendet kein HTTPS.")
-    if not _same_origin(issuer, endpoint):
         raise HTTPException(
-            status_code=502,
-            detail=f"OIDC-{label} liegt außerhalb des freigegebenen Issuer-Ursprungs.",
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"OIDC-{label} ist ungültig.",
+        )
+    if ENVIRONMENT == "production" and parsed.scheme != "https":
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"OIDC-{label} verwendet kein HTTPS.",
+        )
+    if _origin(issuer) != _origin(endpoint):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                f"OIDC-{label} liegt außerhalb des freigegebenen "
+                "Issuer-Ursprungs."
+            ),
         )
     return endpoint
 
@@ -237,15 +279,30 @@ def _oidc_discovery(provider: TenantIdentityProvider) -> dict[str, object]:
     issuer = _normalize_issuer(provider.issuer_url)
     discovery_url = f"{issuer}/.well-known/openid-configuration"
     try:
-        with httpx.Client(timeout=SSO_HTTP_TIMEOUT_SECONDS, follow_redirects=False) as client:
-            response = client.get(discovery_url, headers={"Accept": "application/json"})
+        with httpx.Client(
+            timeout=SSO_HTTP_TIMEOUT_SECONDS,
+            follow_redirects=False,
+        ) as client:
+            response = client.get(
+                discovery_url,
+                headers={"Accept": "application/json"},
+            )
             response.raise_for_status()
             metadata = response.json()
     except (httpx.HTTPError, ValueError) as exc:
-        raise HTTPException(status_code=502, detail="OIDC-Discovery konnte nicht sicher geladen werden.") from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="OIDC-Discovery konnte nicht sicher geladen werden.",
+        ) from exc
 
-    if not isinstance(metadata, dict) or str(metadata.get("issuer", "")).rstrip("/") != issuer:
-        raise HTTPException(status_code=502, detail="OIDC-Discovery liefert einen unerwarteten Issuer.")
+    if (
+        not isinstance(metadata, dict)
+        or str(metadata.get("issuer", "")).rstrip("/") != issuer
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="OIDC-Discovery liefert einen unerwarteten Issuer.",
+        )
 
     for key, label in (
         ("authorization_endpoint", "Authorization Endpoint"),
@@ -254,24 +311,45 @@ def _oidc_discovery(provider: TenantIdentityProvider) -> dict[str, object]:
     ):
         endpoint = metadata.get(key)
         if not isinstance(endpoint, str):
-            raise HTTPException(status_code=502, detail=f"OIDC-{label} fehlt.")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"OIDC-{label} fehlt.",
+            )
         _validate_provider_endpoint(issuer, endpoint, label)
     return metadata
 
 
 def _transaction_encrypt(payload: dict[str, object]) -> str:
-    raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    raw = json.dumps(
+        payload,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
     return _TRANSACTION_FERNET.encrypt(raw).decode("ascii")
 
 
 def _transaction_decrypt(token: str) -> dict[str, object]:
     try:
-        raw = _TRANSACTION_FERNET.decrypt(token.encode("ascii"), ttl=SSO_TRANSACTION_TTL_SECONDS)
+        raw = _TRANSACTION_FERNET.decrypt(
+            token.encode("ascii"),
+            ttl=SSO_TRANSACTION_TTL_SECONDS,
+        )
         payload = json.loads(raw.decode("utf-8"))
-    except (InvalidToken, json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
-        raise HTTPException(status_code=401, detail="SSO-Anmeldevorgang ist ungültig oder abgelaufen.") from exc
+    except (
+        InvalidToken,
+        json.JSONDecodeError,
+        UnicodeDecodeError,
+        ValueError,
+    ) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="SSO-Anmeldevorgang ist ungültig oder abgelaufen.",
+        ) from exc
     if not isinstance(payload, dict):
-        raise HTTPException(status_code=401, detail="SSO-Anmeldevorgang ist ungültig.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="SSO-Anmeldevorgang ist ungültig.",
+        )
     return payload
 
 
@@ -287,7 +365,10 @@ def _hash_code(value: str) -> str:
 
 
 def _frontend_redirect_with_code(code: str) -> str:
-    callback = _validate_callback_url(SSO_FRONTEND_CALLBACK_URL, "SSO_FRONTEND_CALLBACK_URL")
+    callback = _validate_callback_url(
+        SSO_FRONTEND_CALLBACK_URL,
+        "SSO_FRONTEND_CALLBACK_URL",
+    )
     parsed = urlparse(callback)
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))
     query["sso_code"] = code
@@ -311,37 +392,71 @@ def _resolve_jwk(metadata: dict[str, object], id_token: str) -> object:
         kid = header.get("kid")
         alg = header.get("alg")
     except InvalidTokenError as exc:
-        raise HTTPException(status_code=401, detail="OIDC-ID-Token ist ungültig.") from exc
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="OIDC-ID-Token ist ungültig.",
+        ) from exc
 
     if alg not in {"RS256", "RS384", "RS512", "ES256", "ES384"}:
-        raise HTTPException(status_code=401, detail="OIDC-ID-Token verwendet einen nicht zugelassenen Algorithmus.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="OIDC-ID-Token verwendet einen nicht zugelassenen Algorithmus.",
+        )
     if not kid:
-        raise HTTPException(status_code=401, detail="OIDC-ID-Token enthält keine Schlüssel-ID.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="OIDC-ID-Token enthält keine Schlüssel-ID.",
+        )
 
     try:
-        with httpx.Client(timeout=SSO_HTTP_TIMEOUT_SECONDS, follow_redirects=False) as client:
-            response = client.get(jwks_uri, headers={"Accept": "application/json"})
+        with httpx.Client(
+            timeout=SSO_HTTP_TIMEOUT_SECONDS,
+            follow_redirects=False,
+        ) as client:
+            response = client.get(
+                jwks_uri,
+                headers={"Accept": "application/json"},
+            )
             response.raise_for_status()
             jwks = response.json()
     except (httpx.HTTPError, ValueError) as exc:
-        raise HTTPException(status_code=502, detail="OIDC-Signaturschlüssel konnten nicht geladen werden.") from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="OIDC-Signaturschlüssel konnten nicht geladen werden.",
+        ) from exc
 
     keys = jwks.get("keys", []) if isinstance(jwks, dict) else []
     for candidate in keys:
         if isinstance(candidate, dict) and candidate.get("kid") == kid:
             try:
                 return PyJWK.from_dict(candidate, algorithm=alg).key
-            except (InvalidTokenError, ValueError) as exc:
-                raise HTTPException(status_code=401, detail="OIDC-Signaturschlüssel ist ungültig.") from exc
-    raise HTTPException(status_code=401, detail="Passender OIDC-Signaturschlüssel wurde nicht gefunden.")
+            except (PyJWKError, ValueError) as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="OIDC-Signaturschlüssel ist ungültig.",
+                ) from exc
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Passender OIDC-Signaturschlüssel wurde nicht gefunden.",
+    )
 
 
 @router.get("/config", response_model=SSOProviderConfigResponse)
-def get_provider_config(current_user: CurrentUser, db: DBSession) -> SSOProviderConfigResponse:
+def get_provider_config(
+    current_user: CurrentUser,
+    db: DBSession,
+) -> SSOProviderConfigResponse:
     tenant_id = _tenant_admin_id(current_user)
-    provider = db.query(TenantIdentityProvider).filter(TenantIdentityProvider.tenant_id == tenant_id).first()
+    provider = (
+        db.query(TenantIdentityProvider)
+        .filter(TenantIdentityProvider.tenant_id == tenant_id)
+        .first()
+    )
     if provider is None:
-        raise HTTPException(status_code=404, detail="Für diesen Mandanten ist noch kein SSO-Provider konfiguriert.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Für diesen Mandanten ist noch kein SSO-Provider konfiguriert.",
+        )
     return _serialize_provider(provider)
 
 
@@ -356,17 +471,26 @@ def configure_provider(
     secret_env = _validate_secret_env(data.client_secret_env)
     domains = _normalize_domains(data.allowed_domains)
     scopes = " ".join(dict.fromkeys(data.scopes.split()))
-    required_scopes = {"openid"}
-    if not required_scopes.issubset(set(scopes.split())):
-        raise HTTPException(status_code=422, detail="OIDC-Scope 'openid' ist zwingend erforderlich.")
+    if "openid" not in set(scopes.split()):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="OIDC-Scope 'openid' ist zwingend erforderlich.",
+        )
 
     if data.enabled and secret_env and not os.getenv(secret_env):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Der referenzierte SSO-Client-Secret ist in der Laufzeitumgebung nicht gesetzt.",
+            detail=(
+                "Der referenzierte SSO-Client-Secret ist in der "
+                "Laufzeitumgebung nicht gesetzt."
+            ),
         )
 
-    provider = db.query(TenantIdentityProvider).filter(TenantIdentityProvider.tenant_id == tenant_id).first()
+    provider = (
+        db.query(TenantIdentityProvider)
+        .filter(TenantIdentityProvider.tenant_id == tenant_id)
+        .first()
+    )
     if provider is None:
         provider = TenantIdentityProvider(
             tenant_id=tenant_id,
@@ -379,7 +503,10 @@ def configure_provider(
     provider.client_id = data.client_id.strip()
     provider.client_secret_env = secret_env
     provider.scopes = scopes
-    provider.allowed_domains_json = json.dumps(domains, separators=(",", ":"))
+    provider.allowed_domains_json = json.dumps(
+        domains,
+        separators=(",", ":"),
+    )
     provider.enabled = data.enabled
     provider.auto_provision = data.auto_provision
     provider.auto_link_verified_email = data.auto_link_verified_email
@@ -395,95 +522,39 @@ def configure_provider(
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(status_code=409, detail="SSO-Konfiguration konnte nicht gespeichert werden.") from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="SSO-Konfiguration konnte nicht gespeichert werden.",
+        ) from exc
     db.refresh(provider)
     return _serialize_provider(provider)
-
-
-@router.get("/{tenant_slug}", response_model=SSOPublicMetadata)
-def public_sso_metadata(tenant_slug: str, db: DBSession) -> SSOPublicMetadata:
-    tenant = db.query(Tenant).filter(Tenant.slug == tenant_slug, Tenant.is_active.is_(True)).first()
-    if tenant is None:
-        return SSOPublicMetadata(tenant_slug=tenant_slug, enabled=False)
-    provider = db.query(TenantIdentityProvider).filter(TenantIdentityProvider.tenant_id == tenant.id).first()
-    if provider is None or not provider.enabled:
-        return SSOPublicMetadata(tenant_slug=tenant_slug, enabled=False)
-    return SSOPublicMetadata(
-        tenant_slug=tenant_slug,
-        enabled=True,
-        provider_name=provider.name,
-        login_url=f"/auth/sso/{tenant_slug}/login",
-    )
-
-
-@router.get("/{tenant_slug}/login")
-def begin_sso_login(tenant_slug: str, db: DBSession) -> RedirectResponse:
-    _validate_callback_url(SSO_CALLBACK_URL, "SSO_CALLBACK_URL")
-    _validate_callback_url(SSO_FRONTEND_CALLBACK_URL, "SSO_FRONTEND_CALLBACK_URL")
-
-    tenant = db.query(Tenant).filter(Tenant.slug == tenant_slug, Tenant.is_active.is_(True)).first()
-    if tenant is None:
-        raise HTTPException(status_code=404, detail="Mandant wurde nicht gefunden.")
-    provider = db.query(TenantIdentityProvider).filter(TenantIdentityProvider.tenant_id == tenant.id).first()
-    if provider is None or not provider.enabled:
-        raise HTTPException(status_code=404, detail="SSO ist für diesen Mandanten nicht aktiviert.")
-
-    metadata = _oidc_discovery(provider)
-    state = secrets.token_urlsafe(32)
-    nonce = secrets.token_urlsafe(32)
-    verifier, challenge = _pkce_pair()
-    transaction = _transaction_encrypt(
-        {
-            "tenant_id": tenant.id,
-            "provider_id": provider.id,
-            "state": state,
-            "nonce": nonce,
-            "verifier": verifier,
-            "exp": int((_utc_now() + timedelta(seconds=SSO_TRANSACTION_TTL_SECONDS)).timestamp()),
-        }
-    )
-
-    params = {
-        "response_type": "code",
-        "client_id": provider.client_id,
-        "redirect_uri": SSO_CALLBACK_URL,
-        "scope": provider.scopes,
-        "state": state,
-        "nonce": nonce,
-        "code_challenge": challenge,
-        "code_challenge_method": "S256",
-    }
-    location = f"{metadata['authorization_endpoint']}?{urlencode(params)}"
-    response = RedirectResponse(location, status_code=status.HTTP_302_FOUND)
-    response.set_cookie(
-        key=SSO_COOKIE_NAME,
-        value=transaction,
-        max_age=SSO_TRANSACTION_TTL_SECONDS,
-        httponly=True,
-        secure=ENVIRONMENT == "production",
-        samesite="lax",
-        path="/auth/sso",
-    )
-    return response
 
 
 @router.get("/callback", include_in_schema=False)
 def sso_callback(
     request: Request,
+    db: DBSession,
     code: str,
-    state_value: str | None = None,
-    db: DBSession = Depends(get_db),
+    state: str,
 ):
-    state = state_value or request.query_params.get("state")
     transaction_cookie = request.cookies.get(SSO_COOKIE_NAME)
-    if not transaction_cookie or not state:
-        raise HTTPException(status_code=401, detail="SSO-State oder Transaktions-Cookie fehlt.")
+    if not transaction_cookie:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="SSO-Transaktions-Cookie fehlt.",
+        )
 
     transaction = _transaction_decrypt(transaction_cookie)
     if not secrets.compare_digest(str(transaction.get("state", "")), state):
-        raise HTTPException(status_code=401, detail="SSO-State stimmt nicht überein.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="SSO-State stimmt nicht überein.",
+        )
     if int(transaction.get("exp", 0)) < int(_utc_now().timestamp()):
-        raise HTTPException(status_code=401, detail="SSO-Anmeldevorgang ist abgelaufen.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="SSO-Anmeldevorgang ist abgelaufen.",
+        )
 
     tenant_id = int(transaction.get("tenant_id", 0))
     provider_id = int(transaction.get("provider_id", 0))
@@ -497,10 +568,13 @@ def sso_callback(
         .first()
     )
     if provider is None:
-        raise HTTPException(status_code=401, detail="SSO-Provider ist nicht mehr aktiv.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="SSO-Provider ist nicht mehr aktiv.",
+        )
 
     metadata = _oidc_discovery(provider)
-    token_payload = {
+    token_payload: dict[str, str] = {
         "grant_type": "authorization_code",
         "code": code,
         "redirect_uri": SSO_CALLBACK_URL,
@@ -510,11 +584,17 @@ def sso_callback(
     if provider.client_secret_env:
         client_secret = os.getenv(provider.client_secret_env)
         if not client_secret:
-            raise HTTPException(status_code=503, detail="SSO-Client-Secret ist nicht verfügbar.")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="SSO-Client-Secret ist nicht verfügbar.",
+            )
         token_payload["client_secret"] = client_secret
 
     try:
-        with httpx.Client(timeout=SSO_HTTP_TIMEOUT_SECONDS, follow_redirects=False) as client:
+        with httpx.Client(
+            timeout=SSO_HTTP_TIMEOUT_SECONDS,
+            follow_redirects=False,
+        ) as client:
             token_response = client.post(
                 str(metadata["token_endpoint"]),
                 data=token_payload,
@@ -523,11 +603,17 @@ def sso_callback(
             token_response.raise_for_status()
             tokens = token_response.json()
     except (httpx.HTTPError, ValueError) as exc:
-        raise HTTPException(status_code=502, detail="OIDC-Tokenaustausch ist fehlgeschlagen.") from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="OIDC-Tokenaustausch ist fehlgeschlagen.",
+        ) from exc
 
     id_token = tokens.get("id_token") if isinstance(tokens, dict) else None
     if not isinstance(id_token, str):
-        raise HTTPException(status_code=401, detail="OIDC-Provider hat kein ID-Token geliefert.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="OIDC-Provider hat kein ID-Token geliefert.",
+        )
 
     key = _resolve_jwk(metadata, id_token)
     try:
@@ -541,20 +627,43 @@ def sso_callback(
             options={"require": ["exp", "iat", "sub"]},
         )
     except (InvalidTokenError, KeyError) as exc:
-        raise HTTPException(status_code=401, detail="OIDC-ID-Token konnte nicht verifiziert werden.") from exc
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="OIDC-ID-Token konnte nicht verifiziert werden.",
+        ) from exc
 
-    if not secrets.compare_digest(str(claims.get("nonce", "")), str(transaction.get("nonce", ""))):
-        raise HTTPException(status_code=401, detail="OIDC-Nonce stimmt nicht überein.")
+    if not secrets.compare_digest(
+        str(claims.get("nonce", "")),
+        str(transaction.get("nonce", "")),
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="OIDC-Nonce stimmt nicht überein.",
+        )
 
     subject = str(claims.get("sub", "")).strip()
-    email = str(claims.get("email") or claims.get("preferred_username") or "").strip().lower()
+    email = str(
+        claims.get("email")
+        or claims.get("preferred_username")
+        or ""
+    ).strip().lower()
     full_name = str(claims.get("name") or "").strip()[:200] or None
+
     if not subject or not email or "@" not in email:
-        raise HTTPException(status_code=401, detail="OIDC-ID-Token enthält keine nutzbare Identität.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="OIDC-ID-Token enthält keine nutzbare Identität.",
+        )
     if claims.get("email_verified") is False:
-        raise HTTPException(status_code=401, detail="OIDC-E-Mail-Adresse ist ausdrücklich nicht verifiziert.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="OIDC-E-Mail-Adresse ist ausdrücklich nicht verifiziert.",
+        )
     if not _email_allowed(email, provider):
-        raise HTTPException(status_code=403, detail="E-Mail-Domain ist für diesen Mandanten nicht freigegeben.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="E-Mail-Domain ist für diesen Mandanten nicht freigegeben.",
+        )
 
     identity = (
         db.query(FederatedIdentity)
@@ -565,18 +674,35 @@ def sso_callback(
         .first()
     )
     user: User | None = None
+
     if identity is not None:
-        user = db.query(User).filter(User.id == identity.user_id, User.tenant_id == tenant_id).first()
+        user = (
+            db.query(User)
+            .filter(
+                User.id == identity.user_id,
+                User.tenant_id == tenant_id,
+            )
+            .first()
+        )
         identity.last_login_at = _utc_now()
     else:
         existing_user = db.query(User).filter(User.email == email).first()
         if existing_user is not None:
             if existing_user.tenant_id != tenant_id:
-                raise HTTPException(status_code=409, detail="E-Mail-Adresse ist bereits einem anderen Mandanten zugeordnet.")
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "E-Mail-Adresse ist bereits einem anderen "
+                        "Mandanten zugeordnet."
+                    ),
+                )
             if not provider.auto_link_verified_email:
                 raise HTTPException(
-                    status_code=409,
-                    detail="Für dieses bestehende Konto ist eine ausdrückliche SSO-Verknüpfung erforderlich.",
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "Für dieses bestehende Konto ist eine ausdrückliche "
+                        "SSO-Verknüpfung erforderlich."
+                    ),
                 )
             user = existing_user
         elif provider.auto_provision:
@@ -593,8 +719,11 @@ def sso_callback(
             db.flush()
         else:
             raise HTTPException(
-                status_code=403,
-                detail="SSO-Benutzer ist noch nicht provisioniert. Bitte Tenant-Admin kontaktieren.",
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "SSO-Benutzer ist noch nicht provisioniert. "
+                    "Bitte Tenant-Admin kontaktieren."
+                ),
             )
 
         identity = FederatedIdentity(
@@ -609,7 +738,10 @@ def sso_callback(
         db.add(identity)
 
     if user is None or not user.is_active:
-        raise HTTPException(status_code=403, detail="Benutzerkonto ist deaktiviert oder nicht verfügbar.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Benutzerkonto ist deaktiviert oder nicht verfügbar.",
+        )
 
     raw_exchange_code = secrets.token_urlsafe(48)
     exchange = SSOExchangeCode(
@@ -628,13 +760,23 @@ def sso_callback(
     )
     db.commit()
 
-    response = RedirectResponse(_frontend_redirect_with_code(raw_exchange_code), status_code=302)
-    response.delete_cookie(SSO_COOKIE_NAME, path="/auth/sso")
+    response = RedirectResponse(
+        _frontend_redirect_with_code(raw_exchange_code),
+        status_code=status.HTTP_302_FOUND,
+    )
+    response.delete_cookie(
+        SSO_COOKIE_NAME,
+        path="/auth/sso",
+    )
     return response
 
 
 @router.post("/exchange", response_model=SSOExchangeResponse)
-def exchange_sso_code(data: SSOExchangeRequest, response: Response, db: DBSession) -> SSOExchangeResponse:
+def exchange_sso_code(
+    data: SSOExchangeRequest,
+    response: Response,
+    db: DBSession,
+) -> SSOExchangeResponse:
     now = _utc_now()
     record = (
         db.query(SSOExchangeCode)
@@ -642,10 +784,14 @@ def exchange_sso_code(data: SSOExchangeRequest, response: Response, db: DBSessio
             SSOExchangeCode.code_hash == _hash_code(data.code),
             SSOExchangeCode.consumed_at.is_(None),
         )
+        .with_for_update()
         .first()
     )
     if record is None or _as_utc(record.expires_at) <= now:
-        raise HTTPException(status_code=401, detail="SSO-Austauschcode ist ungültig oder abgelaufen.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="SSO-Austauschcode ist ungültig oder abgelaufen.",
+        )
 
     user = (
         db.query(User)
@@ -657,7 +803,10 @@ def exchange_sso_code(data: SSOExchangeRequest, response: Response, db: DBSessio
         .first()
     )
     if user is None:
-        raise HTTPException(status_code=401, detail="SSO-Benutzer ist nicht verfügbar.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="SSO-Benutzer ist nicht verfügbar.",
+        )
 
     record.consumed_at = now
     db.add(
@@ -668,9 +817,131 @@ def exchange_sso_code(data: SSOExchangeRequest, response: Response, db: DBSessio
         )
     )
     db.commit()
+
     response.headers["Cache-Control"] = "no-store"
     return SSOExchangeResponse(
         access_token=create_access_token(user),
         token_type=TOKEN_TYPE,
         expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
+
+
+@router.get("/tenant/{tenant_slug}", response_model=SSOPublicMetadata)
+def public_sso_metadata(
+    tenant_slug: str,
+    db: DBSession,
+) -> SSOPublicMetadata:
+    tenant = (
+        db.query(Tenant)
+        .filter(
+            Tenant.slug == tenant_slug,
+            Tenant.is_active.is_(True),
+        )
+        .first()
+    )
+    if tenant is None:
+        return SSOPublicMetadata(
+            tenant_slug=tenant_slug,
+            enabled=False,
+        )
+
+    provider = (
+        db.query(TenantIdentityProvider)
+        .filter(TenantIdentityProvider.tenant_id == tenant.id)
+        .first()
+    )
+    if provider is None or not provider.enabled:
+        return SSOPublicMetadata(
+            tenant_slug=tenant_slug,
+            enabled=False,
+        )
+
+    return SSOPublicMetadata(
+        tenant_slug=tenant_slug,
+        enabled=True,
+        provider_name=provider.name,
+        login_url=f"/auth/sso/tenant/{tenant_slug}/login",
+    )
+
+
+@router.get("/tenant/{tenant_slug}/login")
+def begin_sso_login(
+    tenant_slug: str,
+    db: DBSession,
+) -> RedirectResponse:
+    _validate_callback_url(SSO_CALLBACK_URL, "SSO_CALLBACK_URL")
+    _validate_callback_url(
+        SSO_FRONTEND_CALLBACK_URL,
+        "SSO_FRONTEND_CALLBACK_URL",
+    )
+
+    tenant = (
+        db.query(Tenant)
+        .filter(
+            Tenant.slug == tenant_slug,
+            Tenant.is_active.is_(True),
+        )
+        .first()
+    )
+    if tenant is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Mandant wurde nicht gefunden.",
+        )
+
+    provider = (
+        db.query(TenantIdentityProvider)
+        .filter(TenantIdentityProvider.tenant_id == tenant.id)
+        .first()
+    )
+    if provider is None or not provider.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="SSO ist für diesen Mandanten nicht aktiviert.",
+        )
+
+    metadata = _oidc_discovery(provider)
+    state = secrets.token_urlsafe(32)
+    nonce = secrets.token_urlsafe(32)
+    verifier, challenge = _pkce_pair()
+    transaction = _transaction_encrypt(
+        {
+            "tenant_id": tenant.id,
+            "provider_id": provider.id,
+            "state": state,
+            "nonce": nonce,
+            "verifier": verifier,
+            "exp": int(
+                (
+                    _utc_now()
+                    + timedelta(seconds=SSO_TRANSACTION_TTL_SECONDS)
+                ).timestamp()
+            ),
+        }
+    )
+
+    params = {
+        "response_type": "code",
+        "client_id": provider.client_id,
+        "redirect_uri": SSO_CALLBACK_URL,
+        "scope": provider.scopes,
+        "state": state,
+        "nonce": nonce,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+    }
+    location = f"{metadata['authorization_endpoint']}?{urlencode(params)}"
+    response = RedirectResponse(
+        location,
+        status_code=status.HTTP_302_FOUND,
+    )
+    response.set_cookie(
+        key=SSO_COOKIE_NAME,
+        value=transaction,
+        max_age=SSO_TRANSACTION_TTL_SECONDS,
+        httponly=True,
+        secure=ENVIRONMENT == "production",
+        samesite="lax",
+        path="/auth/sso",
+    )
+    return response
