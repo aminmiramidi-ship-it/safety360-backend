@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 
 from database import Base
 
@@ -47,7 +47,12 @@ class DguvCatalogChange(Base):
     __tablename__ = "dguv_catalog_changes"
 
     id = Column(Integer, primary_key=True, index=True)
-    publication_id = Column(Integer, nullable=False, index=True)
+    publication_id = Column(
+        Integer,
+        ForeignKey("dguv_publications.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     change_type = Column(String(50), nullable=False, index=True)
     previous_hash = Column(String(64), nullable=True)
     new_hash = Column(String(64), nullable=False)
