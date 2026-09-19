@@ -1,6 +1,15 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 
 from database import Base
 
@@ -50,8 +59,16 @@ class TenantIdentityProvider(Base):
 class FederatedIdentity(Base):
     __tablename__ = "federated_identities"
     __table_args__ = (
-        UniqueConstraint("provider_id", "subject", name="uq_federated_identity_provider_subject"),
-        UniqueConstraint("provider_id", "user_id", name="uq_federated_identity_provider_user"),
+        UniqueConstraint(
+            "provider_id",
+            "subject",
+            name="uq_federated_identity_provider_subject",
+        ),
+        UniqueConstraint(
+            "provider_id",
+            "user_id",
+            name="uq_federated_identity_provider_user",
+        ),
     )
 
     id = Column(Integer, primary_key=True, index=True)
