@@ -7,6 +7,7 @@ import dguv_catalog_models  # noqa: F401
 import identity_models  # noqa: F401
 import industry_models  # noqa: F401
 import ingestion_models  # noqa: F401
+import legal_graph_models  # noqa: F401
 import models  # noqa: F401
 import privacy_models  # noqa: F401
 import regulatory_models  # noqa: F401
