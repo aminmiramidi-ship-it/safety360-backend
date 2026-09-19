@@ -33,10 +33,11 @@ from schemas import (
     TicketResponse,
     UserResponse,
 )
+from sso_api import router as sso_router
 from tenants import router as tenant_router
 from translation_api import router as translation_router
 
-APP_VERSION = "1.7.0"
+APP_VERSION = "1.8.0"
 ENVIRONMENT = os.getenv("SAFETY360_ENV", "development").lower()
 MAX_IMPORT_BYTES = int(os.getenv("MAX_IMPORT_BYTES", str(20 * 1024 * 1024)))
 
@@ -74,7 +75,7 @@ app = FastAPI(
     version=APP_VERSION,
     description=(
         "Safety360 Backend für HSE, IMS, Dokumente, Ablage, Tickets, KI, Übersetzung, "
-        "adaptive Agent-Orchestrierung und Plattformdienste."
+        "adaptive Agent-Orchestrierung, Enterprise-SSO und Plattformdienste."
     ),
 )
 
@@ -124,6 +125,7 @@ async def security_headers(request: Request, call_next):
 
 
 app.include_router(auth_router, prefix="/auth", tags=["Auth"])
+app.include_router(sso_router, prefix="/auth/sso", tags=["Enterprise SSO"])
 app.include_router(tenant_router, prefix="/tenants", tags=["Tenants"])
 app.include_router(document_router, prefix="/documents", tags=["Document Control"])
 app.include_router(file_router, prefix="/files", tags=["File Storage"])
