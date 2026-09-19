@@ -11,6 +11,7 @@ on:
       - safety360-agent-orchestration
       - safety360-agent-memory
       - safety360-secure-ingestion
+      - safety360-privacy-governance
   pull_request:
     branches:
       - main
@@ -18,6 +19,7 @@ on:
       - safety360-i18n-core
       - safety360-agent-orchestration
       - safety360-agent-memory
+      - safety360-secure-ingestion
 
 permissions:
   contents: read
@@ -76,6 +78,10 @@ jobs:
               "tenant_identity_providers",
               "federated_identities",
               "sso_exchange_codes",
+              "privacy_processing_activities",
+              "privacy_impact_assessments",
+              "privacy_retention_rules",
+              "privacy_data_subject_requests",
               "audit_log",
           }
           missing = required - tables
