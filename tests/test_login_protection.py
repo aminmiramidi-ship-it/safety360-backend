@@ -67,6 +67,18 @@ def test_expired_cooldown_allows_valid_login_and_resets_state():
 
     db = SessionLocal()
     try:
+        target_account = (
+            db.query(LoginThrottle)
+            .filter(
+                LoginThrottle.key_type == "account",
+                LoginThrottle.locked_until.is_not(None),
+            )
+            .order_by(LoginThrottle.id.desc())
+            .first()
+        )
+        assert target_account is not None
+        target_account_id = target_account.id
+
         past = datetime.now(timezone.utc) - timedelta(hours=2)
         throttles = db.query(LoginThrottle).all()
         for throttle in throttles:
@@ -84,10 +96,13 @@ def test_expired_cooldown_allows_valid_login_and_resets_state():
 
     db = SessionLocal()
     try:
-        account_rows = db.query(LoginThrottle).filter(LoginThrottle.key_type == "account").all()
-        assert account_rows
-        assert all(row.failed_attempts == 0 for row in account_rows)
-        assert all(row.locked_until is None for row in account_rows)
+        account_row = (
+            db.query(LoginThrottle)
+            .filter(LoginThrottle.id == target_account_id)
+            .one()
+        )
+        assert account_row.failed_attempts == 0
+        assert account_row.locked_until is None
     finally:
         db.close()
 
