@@ -1,5 +1,4 @@
 import hashlib
-import json
 import os
 import shutil
 import subprocess
@@ -10,7 +9,16 @@ from pathlib import Path, PurePosixPath
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -41,7 +49,9 @@ STORAGE_ROOT = Path(os.getenv("STORAGE_ROOT", "./storage_data")).resolve()
 FILE_SCAN_PROVIDER = os.getenv("FILE_SCAN_PROVIDER", "none").strip().lower()
 CLAMSCAN_PATH = os.getenv("CLAMSCAN_PATH", "clamscan").strip()
 DOCUMENT_CONVERSION_MODE = os.getenv("DOCUMENT_CONVERSION_MODE", "disabled").strip().lower()
-DOCUMENT_CONVERSION_SANDBOXED = os.getenv("DOCUMENT_CONVERSION_SANDBOXED", "false").lower() == "true"
+DOCUMENT_CONVERSION_SANDBOXED = (
+    os.getenv("DOCUMENT_CONVERSION_SANDBOXED", "false").lower() == "true"
+)
 LIBREOFFICE_PATH = os.getenv("LIBREOFFICE_PATH", "libreoffice").strip()
 
 SUPPORTED_TYPES: dict[str, tuple[str, str]] = {
@@ -113,7 +123,11 @@ class ExtractedContentResponse(BaseModel):
 
 class DocumentFromFileRequest(BaseModel):
     title: str | None = Field(default=None, max_length=250)
-    document_type: str = Field(default="imported_document", min_length=2, max_length=80)
+    document_type: str = Field(
+        default="imported_document",
+        min_length=2,
+        max_length=80,
+    )
 
 
 class ConvertedFileResponse(BaseModel):
@@ -125,7 +139,10 @@ def _require_tenant(current_user: User) -> int:
     if current_user.tenant_id is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Vor der Dateiablage muss ein Mandant angelegt oder zugeordnet werden.",
+            detail=(
+                "Vor der Dateiablage muss ein Mandant angelegt "
+                "oder zugeordnet werden."
+            ),
         )
     return current_user.tenant_id
 
@@ -135,8 +152,9 @@ def _validate_local_provider() -> None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
-                "Der konfigurierte Storage-Provider ist in diesem Build noch nicht aktiviert. "
-                "Für Entwicklung und Self-Hosting steht STORAGE_PROVIDER=local zur Verfügung."
+                "Der konfigurierte Storage-Provider ist in diesem Build noch nicht "
+                "aktiviert. Für Entwicklung und Self-Hosting steht "
+                "STORAGE_PROVIDER=local zur Verfügung."
             ),
         )
 
@@ -152,8 +170,8 @@ def _safe_suffix(filename: str | None) -> str:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail=(
-                "Nicht unterstütztes Dateiformat. Zulässig sind PDF, DOCX, XLSX, PPTX, "
-                "TXT, Markdown, CSV und JSON."
+                "Nicht unterstütztes Dateiformat. Zulässig sind PDF, DOCX, XLSX, "
+                "PPTX, TXT, Markdown, CSV und JSON."
             ),
         )
     return suffix
@@ -212,7 +230,10 @@ def _validate_office_archive(path: Path, suffix: str) -> None:
         with zipfile.ZipFile(path) as archive:
             entries = archive.infolist()
             if len(entries) > MAX_ARCHIVE_ENTRIES:
-                raise HTTPException(status_code=422, detail="Office-Datei enthält zu viele Archiveinträge.")
+                raise HTTPException(
+                    status_code=422,
+                    detail="Office-Datei enthält zu viele Archiveinträge.",
+                )
 
             total_uncompressed = 0
             expected_prefix = {
@@ -227,27 +248,48 @@ def _validate_office_archive(path: Path, suffix: str) -> None:
                 pure = PurePosixPath(normalized_name)
                 lowered = f"/{normalized_name.lower()}"
                 if pure.is_absolute() or ".." in pure.parts:
-                    raise HTTPException(status_code=422, detail="Office-Datei enthält unsichere Archivpfade.")
+                    raise HTTPException(
+                        status_code=422,
+                        detail="Office-Datei enthält unsichere Archivpfade.",
+                    )
                 if any(marker in lowered for marker in DANGEROUS_OFFICE_PARTS):
                     raise HTTPException(
                         status_code=422,
-                        detail="Office-Datei enthält aktive, eingebettete oder externe Inhalte und wurde abgelehnt.",
+                        detail=(
+                            "Office-Datei enthält aktive, eingebettete oder externe "
+                            "Inhalte und wurde abgelehnt."
+                        ),
                     )
                 if normalized_name.startswith(expected_prefix):
                     has_expected_part = True
                 total_uncompressed += entry.file_size
                 if total_uncompressed > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
-                    raise HTTPException(status_code=422, detail="Office-Datei überschreitet das Entpack-Limit.")
+                    raise HTTPException(
+                        status_code=422,
+                        detail="Office-Datei überschreitet das Entpack-Limit.",
+                    )
                 if entry.compress_size > 0:
                     ratio = entry.file_size / entry.compress_size
                     if ratio > MAX_ARCHIVE_COMPRESSION_RATIO:
-                        raise HTTPException(status_code=422, detail="Office-Datei weist ein unsicheres Kompressionsverhältnis auf.")
+                        raise HTTPException(
+                            status_code=422,
+                            detail=(
+                                "Office-Datei weist ein unsicheres "
+                                "Kompressionsverhältnis auf."
+                            ),
+                        )
 
             names = {entry.filename for entry in entries}
             if "[Content_Types].xml" not in names or not has_expected_part:
-                raise HTTPException(status_code=422, detail="Office-Dateistruktur passt nicht zur Dateiendung.")
+                raise HTTPException(
+                    status_code=422,
+                    detail="Office-Dateistruktur passt nicht zur Dateiendung.",
+                )
     except zipfile.BadZipFile as exc:
-        raise HTTPException(status_code=422, detail="Office-Datei ist kein gültiges OpenXML-Archiv.") from exc
+        raise HTTPException(
+            status_code=422,
+            detail="Office-Datei ist kein gültiges OpenXML-Archiv.",
+        ) from exc
 
 
 def _validate_file_structure(path: Path, suffix: str) -> tuple[str, str]:
@@ -257,17 +299,26 @@ def _validate_file_structure(path: Path, suffix: str) -> tuple[str, str]:
 
     if suffix == ".pdf":
         if not prefix.startswith(b"%PDF-"):
-            raise HTTPException(status_code=422, detail="PDF-Signatur stimmt nicht mit der Dateiendung überein.")
+            raise HTTPException(
+                status_code=422,
+                detail="PDF-Signatur stimmt nicht mit der Dateiendung überein.",
+            )
     elif suffix in {".docx", ".xlsx", ".pptx"}:
         if not prefix.startswith(b"PK\x03\x04"):
-            raise HTTPException(status_code=422, detail="Office-Signatur stimmt nicht mit der Dateiendung überein.")
+            raise HTTPException(
+                status_code=422,
+                detail="Office-Signatur stimmt nicht mit der Dateiendung überein.",
+            )
         _validate_office_archive(path, suffix)
     else:
         try:
             with path.open("r", encoding="utf-8-sig", errors="strict") as handle:
                 handle.read(min(MAX_FILE_BYTES, 1024 * 1024))
         except UnicodeDecodeError as exc:
-            raise HTTPException(status_code=422, detail="Textdateien müssen UTF-8-kodiert sein.") from exc
+            raise HTTPException(
+                status_code=422,
+                detail="Textdateien müssen UTF-8-kodiert sein.",
+            ) from exc
 
     return detected_format, media_type
 
@@ -277,12 +328,18 @@ def _scan_file(path: Path) -> str:
         if ENVIRONMENT == "production":
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Dateiupload ist in Produktion ohne aktivierten Malware-Scanner gesperrt.",
+                detail=(
+                    "Dateiupload ist in Produktion ohne aktivierten "
+                    "Malware-Scanner gesperrt."
+                ),
             )
         return "not_configured"
 
     if FILE_SCAN_PROVIDER != "clamav":
-        raise HTTPException(status_code=503, detail="Unbekannter Malware-Scan-Provider.")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unbekannter Malware-Scan-Provider.",
+        )
 
     try:
         completed = subprocess.run(
@@ -293,13 +350,22 @@ def _scan_file(path: Path) -> str:
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise HTTPException(status_code=503, detail="Malware-Scanner ist nicht verfügbar.") from exc
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Malware-Scanner ist nicht verfügbar.",
+        ) from exc
 
     if completed.returncode == 0:
         return "clean"
     if completed.returncode == 1:
-        raise HTTPException(status_code=422, detail="Datei wurde vom Malware-Scanner abgelehnt.")
-    raise HTTPException(status_code=503, detail="Malware-Scan konnte nicht zuverlässig abgeschlossen werden.")
+        raise HTTPException(
+            status_code=422,
+            detail="Datei wurde vom Malware-Scanner abgelehnt.",
+        )
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Malware-Scan konnte nicht zuverlässig abgeschlossen werden.",
+    )
 
 
 def _register_ingestion(
@@ -407,7 +473,10 @@ def _extract_text(path: Path, detected_format: str) -> tuple[str, str, bool]:
                     break
         parser = "utf8-text"
     else:
-        raise HTTPException(status_code=415, detail="Für dieses Format ist keine Textextraktion verfügbar.")
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Für dieses Format ist keine Textextraktion verfügbar.",
+        )
 
     text = "\n".join(chunks).strip()
     return text, parser, truncated
@@ -421,7 +490,10 @@ def _process_file_record(
 ) -> FileProcessingResponse:
     path = _physical_path(stored_file.storage_key)
     if not path.is_file():
-        raise HTTPException(status_code=503, detail="Dateiinhalt ist im Speicher nicht verfügbar.")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Dateiinhalt ist im Speicher nicht verfügbar.",
+        )
 
     record.processing_status = "processing"
     record.error_message = None
@@ -438,7 +510,10 @@ def _process_file_record(
         record.processing_status = "failed"
         record.error_message = "Dokument konnte nicht sicher verarbeitet werden."
         db.commit()
-        raise HTTPException(status_code=422, detail="Dokument konnte nicht sicher verarbeitet werden.") from exc
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Dokument konnte nicht sicher verarbeitet werden.",
+        ) from exc
 
     record.extracted_text = text
     record.extracted_sha256 = hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -508,11 +583,21 @@ def _persist_generated_file(
     )
     db.add(stored_file)
     db.flush()
-    _register_ingestion(db, stored_file, detected_format, scan_status, created_by_id)
+    _register_ingestion(
+        db,
+        stored_file,
+        detected_format,
+        scan_status,
+        created_by_id,
+    )
     return stored_file
 
 
-@router.post("", response_model=StoredFileResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=StoredFileResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def upload_file(
     file: Upload,
     current_user: CurrentUser,
@@ -541,7 +626,10 @@ async def upload_file(
                 if size > MAX_FILE_BYTES:
                     raise HTTPException(
                         status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                        detail="Die hochgeladene Datei überschreitet das konfigurierte Größenlimit.",
+                        detail=(
+                            "Die hochgeladene Datei überschreitet das "
+                            "konfigurierte Größenlimit."
+                        ),
                     )
                 hasher.update(chunk)
                 handle.write(chunk)
@@ -573,10 +661,19 @@ async def upload_file(
     )
     db.add(stored_file)
     db.flush()
-    _register_ingestion(db, stored_file, detected_format, scan_status, current_user.id)
+    _register_ingestion(
+        db,
+        stored_file,
+        detected_format,
+        scan_status,
+        current_user.id,
+    )
     db.add(
         AuditLog(
-            event=f"file_uploaded:{stored_file.id}:{stored_file.sha256}:{scan_status}",
+            event=(
+                f"file_uploaded:{stored_file.id}:{stored_file.sha256}:"
+                f"{scan_status}"
+            ),
             user_id=current_user.id,
             tenant_id=tenant_id,
         )
@@ -657,7 +754,10 @@ def process_file(
         .first()
     )
     if record is None:
-        raise HTTPException(status_code=409, detail="Für die Datei fehlt ein sicherer Ingestion-Datensatz.")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Für die Datei fehlt ein sicherer Ingestion-Datensatz.",
+        )
     return _process_file_record(db, stored_file, record, current_user)
 
 
@@ -678,18 +778,31 @@ def extracted_content(
         )
         .first()
     )
-    if record is None or record.processing_status != "processed" or record.extracted_text is None:
-        raise HTTPException(status_code=409, detail="Datei wurde noch nicht erfolgreich verarbeitet.")
+    if (
+        record is None
+        or record.processing_status != "processed"
+        or record.extracted_text is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Datei wurde noch nicht erfolgreich verarbeitet.",
+        )
     return ExtractedContentResponse(
         file_id=stored_file.id,
         detected_format=record.detected_format,
         parser=record.parser,
         text=record.extracted_text,
-        sha256=record.extracted_sha256 or hashlib.sha256(record.extracted_text.encode("utf-8")).hexdigest(),
+        sha256=(
+            record.extracted_sha256
+            or hashlib.sha256(record.extracted_text.encode("utf-8")).hexdigest()
+        ),
     )
 
 
-@router.post("/{file_id}/to-document", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{file_id}/to-document",
+    status_code=status.HTTP_201_CREATED,
+)
 def create_controlled_document_from_file(
     file_id: int,
     data: DocumentFromFileRequest,
@@ -708,8 +821,15 @@ def create_controlled_document_from_file(
         )
         .first()
     )
-    if record is None or record.processing_status != "processed" or record.extracted_text is None:
-        raise HTTPException(status_code=409, detail="Datei muss vor der Übernahme zuerst verarbeitet werden.")
+    if (
+        record is None
+        or record.processing_status != "processed"
+        or record.extracted_text is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Datei muss vor der Übernahme zuerst verarbeitet werden.",
+        )
 
     title = (data.title or Path(stored_file.original_name).stem).strip()[:250]
     document = Document(
@@ -740,11 +860,17 @@ def create_controlled_document_from_file(
         "version": document.version,
         "source_file_id": stored_file.id,
         "source_sha256": stored_file.sha256,
-        "note": "Originaldatei bleibt unverändert erhalten; Bearbeitung erfolgt revisionssicher im Dokumentenworkflow.",
+        "note": (
+            "Originaldatei bleibt unverändert erhalten; Bearbeitung erfolgt "
+            "revisionssicher im Dokumentenworkflow."
+        ),
     }
 
 
-@router.post("/{file_id}/convert/pdf", response_model=ConvertedFileResponse)
+@router.post(
+    "/{file_id}/convert/pdf",
+    response_model=ConvertedFileResponse,
+)
 def convert_file_to_pdf(
     file_id: int,
     current_user: CurrentUser,
@@ -757,15 +883,27 @@ def convert_file_to_pdf(
     suffix = Path(stored_file.original_name).suffix.lower()
 
     if suffix == ".pdf":
-        raise HTTPException(status_code=409, detail="Datei liegt bereits als PDF vor.")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Datei liegt bereits als PDF vor.",
+        )
     if suffix not in {".docx", ".xlsx", ".pptx"}:
-        raise HTTPException(status_code=415, detail="PDF-Konvertierung ist für dieses Format nicht verfügbar.")
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="PDF-Konvertierung ist für dieses Format nicht verfügbar.",
+        )
     if DOCUMENT_CONVERSION_MODE != "libreoffice":
-        raise HTTPException(status_code=503, detail="Dokumentkonvertierung ist nicht aktiviert.")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Dokumentkonvertierung ist nicht aktiviert.",
+        )
     if ENVIRONMENT == "production" and not DOCUMENT_CONVERSION_SANDBOXED:
         raise HTTPException(
-            status_code=503,
-            detail="Produktive Office-Konvertierung ist ohne isolierten Sandbox-Worker gesperrt.",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Produktive Office-Konvertierung ist ohne isolierten "
+                "Sandbox-Worker gesperrt."
+            ),
         )
 
     with tempfile.TemporaryDirectory(prefix="safety360-convert-") as temp_dir:
@@ -791,11 +929,17 @@ def convert_file_to_pdf(
                 env={**os.environ, "HOME": str(workdir)},
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
-            raise HTTPException(status_code=503, detail="Dokumentkonverter ist nicht verfügbar.") from exc
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Dokumentkonverter ist nicht verfügbar.",
+            ) from exc
 
         output = workdir / "source.pdf"
         if completed.returncode != 0 or not output.is_file():
-            raise HTTPException(status_code=422, detail="Dokument konnte nicht in PDF umgewandelt werden.")
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Dokument konnte nicht in PDF umgewandelt werden.",
+            )
 
         converted_name = f"{Path(stored_file.original_name).stem}.pdf"
         converted = _persist_generated_file(
@@ -853,7 +997,12 @@ def restore_file(
 ) -> StoredFile:
     require_permission(current_user, "files.archive")
     tenant_id = _require_tenant(current_user)
-    stored_file = _tenant_file(db, file_id, tenant_id, include_archived=True)
+    stored_file = _tenant_file(
+        db,
+        file_id,
+        tenant_id,
+        include_archived=True,
+    )
     stored_file.archived_at = None
     db.add(
         AuditLog(
@@ -875,10 +1024,15 @@ def delete_file_permanently(
 ) -> Response:
     require_permission(current_user, "files.delete")
     tenant_id = _require_tenant(current_user)
-    stored_file = _tenant_file(db, file_id, tenant_id, include_archived=True)
+    stored_file = _tenant_file(
+        db,
+        file_id,
+        tenant_id,
+        include_archived=True,
+    )
     if stored_file.archived_at is None:
         raise HTTPException(
-            status_code=409,
+            status_code=status.HTTP_409_CONFLICT,
             detail="Datei muss vor einer endgültigen Löschung archiviert werden.",
         )
 
@@ -891,6 +1045,16 @@ def delete_file_permanently(
             tenant_id=tenant_id,
         )
     )
+    ingestion = (
+        db.query(FileIngestionRecord)
+        .filter(
+            FileIngestionRecord.file_id == stored_file.id,
+            FileIngestionRecord.tenant_id == tenant_id,
+        )
+        .first()
+    )
+    if ingestion is not None:
+        db.delete(ingestion)
     db.delete(stored_file)
     db.commit()
     path.unlink(missing_ok=True)
