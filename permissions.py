@@ -63,6 +63,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "content.generate",
         "realtime.connect",
         "occupational_health.read",
+        "audit.read",
     },
     "hse_manager": {
         "dashboard.read",
@@ -100,6 +101,9 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "occupational_health.manage",
         "occupational_health.schedule",
         "integrations.read",
+        "audit.read",
+        "audit.verify",
+        "audit.export",
     },
     "occupational_physician": {
         "dashboard.read",
@@ -148,6 +152,9 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "content.scan_impacts",
         "realtime.connect",
         "integrations.read",
+        "audit.read",
+        "audit.verify",
+        "audit.export",
     },
     "tenant_admin": {
         "dashboard.read",
@@ -194,6 +201,9 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "occupational_health.schedule",
         "integrations.read",
         "integrations.manage",
+        "audit.read",
+        "audit.verify",
+        "audit.export",
     },
     "admin": {"*"},
 }

@@ -15,6 +15,8 @@ from sqlalchemy.orm import Session
 
 from agent_api import router as agent_router
 from assistant_api import router as assistant_router
+from audit_api import router as audit_router
+from audit_integrity import append_audit_event
 from auth import get_current_user
 from auth import router as auth_router
 from billing_api import router as billing_router
@@ -49,7 +51,7 @@ from sso_api import router as sso_router
 from tenants import router as tenant_router
 from translation_api import router as translation_router
 
-APP_VERSION = "2.9.0"
+APP_VERSION = "3.0.0"
 ENVIRONMENT = os.getenv("SAFETY360_ENV", "development").lower()
 MAX_IMPORT_BYTES = int(os.getenv("MAX_IMPORT_BYTES", str(20 * 1024 * 1024)))
 
@@ -92,7 +94,7 @@ app = FastAPI(
         "Prozessintelligenz, integrierte Content-/Training-Factory mit Impact-/Revisionssteuerung, "
         "DGUV-basierte deutsche Arbeitsschutzgrundlagen mit lizenz-/rechtebewusster Quellen-Governance, "
         "Dokumente, Ablage, Tickets, KI, Übersetzung, adaptive Agent-Orchestrierung, Enterprise-SSO, "
-        "ticket-gesicherte Realtime-Verbindungen und Plattformdienste."
+        "ticket-gesicherte Realtime-Verbindungen, HMAC-verkettete Audit-Ereignisse und Plattformdienste."
     ),
 )
 
@@ -124,7 +126,14 @@ app.add_middleware(
     allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Accept",
+        "Origin",
+        "X-Requested-With",
+        "X-CSRF-Token",
+    ],
 )
 
 
@@ -157,6 +166,7 @@ app.include_router(integration_router, prefix="/integrations", tags=["Enterprise
 app.include_router(occupational_health_router, prefix="/occupational-health", tags=["Occupational Health Autopilot"])
 app.include_router(privacy_router, prefix="/privacy", tags=["Privacy & GDPR Governance"])
 app.include_router(realtime_router, prefix="/realtime", tags=["Secure Realtime"])
+app.include_router(audit_router, prefix="/audit", tags=["Audit Integrity"])
 app.include_router(regulatory_router, prefix="/regulatory", tags=["Regulatory Intelligence"])
 app.include_router(
     legal_graph_router,
@@ -289,6 +299,16 @@ def create_ticket(
             user_id=current_user.id,
             tenant_id=current_user.tenant_id,
         )
+    )
+    append_audit_event(
+        db,
+        tenant_id=current_user.tenant_id,
+        actor_user_id=current_user.id,
+        action="ticket.created",
+        object_type="ticket",
+        object_id=ticket.id,
+        source="tickets",
+        details={"status": ticket.status},
     )
 
     db.commit()

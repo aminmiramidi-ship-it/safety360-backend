@@ -12,6 +12,7 @@ from jwt import InvalidTokenError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from audit_integrity import append_audit_event
 from database import get_db
 from models import AuditLog, User
 from schemas import LoginRequest, TokenResponse, UserCreate, UserResponse
@@ -313,6 +314,17 @@ def register(user_data: UserCreate, db: DBSession) -> User:
 def login(login_data: LoginRequest, db: DBSession) -> TokenResponse:
     user = _authenticate_password(login_data, db)
     token = create_access_token(user)
+    append_audit_event(
+        db,
+        tenant_id=user.tenant_id,
+        actor_user_id=user.id,
+        action="auth.login.succeeded",
+        object_type="user",
+        object_id=user.id,
+        source="auth",
+        details={"authentication_mode": "bearer"},
+    )
+    db.commit()
     return TokenResponse(
         access_token=token,
         token_type=TOKEN_TYPE,
@@ -347,6 +359,16 @@ def browser_session_login(
             tenant_id=user.tenant_id,
         )
     )
+    append_audit_event(
+        db,
+        tenant_id=user.tenant_id,
+        actor_user_id=user.id,
+        action="auth.browser_session.created",
+        object_type="browser_session",
+        object_id=browser_session.id,
+        source="auth",
+        details={"authentication_mode": "cookie", "ttl_minutes": SESSION_TTL_MINUTES},
+    )
     db.commit()
 
     _set_browser_session_cookies(response, session_token, csrf_token, expires_at)
@@ -374,6 +396,16 @@ def browser_session_logout(
                     user_id=current_user.id,
                     tenant_id=current_user.tenant_id,
                 )
+            )
+            append_audit_event(
+                db,
+                tenant_id=current_user.tenant_id,
+                actor_user_id=current_user.id,
+                action="auth.browser_session.revoked",
+                object_type="browser_session",
+                object_id=browser_session.id,
+                source="auth",
+                details={"reason": "user_logout"},
             )
             db.commit()
 
