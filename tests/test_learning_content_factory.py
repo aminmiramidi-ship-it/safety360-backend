@@ -99,8 +99,9 @@ def test_content_pack_generates_reviewable_linked_outlines():
     assert approved.json()["human_review_required"] is False
 
 
-def test_content_factory_is_tenant_scoped_and_role_protected():
+def test_content_factory_is_role_protected():
     email = "content-factory-reader@example.com"
     headers = _register_login(email)
     response = client.get("/content-factory/packs", headers=headers)
     assert response.status_code == 403, response.text
+    assert response.json()["detail"] == "Für diese Aktion fehlen die erforderlichen Berechtigungen."

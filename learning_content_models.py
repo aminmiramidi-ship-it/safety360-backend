@@ -48,6 +48,7 @@ class LearningContentPack(Base):
     language = Column(String(20), nullable=False, default="de", index=True)
     depth_profile = Column(String(40), nullable=False, default="standard", index=True)
     status = Column(String(40), nullable=False, default="draft", index=True)
+    currentness_status = Column(String(40), nullable=False, default="current", index=True)
     source_refs_json = Column(Text, nullable=False, default="[]")
     requirement_refs_json = Column(Text, nullable=False, default="[]")
     content_hash = Column(String(64), nullable=False, index=True)
