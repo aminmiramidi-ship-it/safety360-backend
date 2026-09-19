@@ -344,6 +344,71 @@ class TenantSubscription(Base):
     )
 
 
+class AgentRun(Base):
+    __tablename__ = "agent_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_id = Column(String(36), nullable=False, unique=True, index=True)
+    tenant_id = Column(
+        Integer,
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    created_by_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    objective_hash = Column(String(64), nullable=False, index=True)
+    selected_agents_json = Column(Text, nullable=False)
+    learning_mode = Column(String(80), nullable=False, default="feedback_and_outcome_adaptation")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class AgentFeedback(Base):
+    __tablename__ = "agent_feedback"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "agent_id",
+            name="uq_agent_feedback_run_agent",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(
+        Integer,
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    run_id = Column(
+        String(36),
+        ForeignKey("agent_runs.run_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    agent_id = Column(String(50), nullable=False, index=True)
+    outcome = Column(String(30), nullable=False, index=True)
+    rating = Column(Integer, nullable=False)
+    workflow = Column(String(80), nullable=False, default="general", index=True)
+    created_by_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+
 class AuditLog(Base):
     __tablename__ = "audit_log"
 
