@@ -94,6 +94,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "agents.feedback",
         "tenant.invite",
         "tenant.manage",
+        "sso.manage",
         "billing.read",
         "ims.read",
         "ims.create",
