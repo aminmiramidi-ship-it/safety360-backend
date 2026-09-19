@@ -101,6 +101,9 @@ jobs:
               "audit_chain_heads",
               "audit_events",
               "login_throttles",
+              "webauthn_user_handles",
+              "passkey_credentials",
+              "webauthn_ceremonies",
               "audit_log",
           }
           missing = required - tables
@@ -161,6 +164,33 @@ jobs:
           }
           if not expected_throttle_columns.issubset(throttle_columns):
               raise SystemExit("Login throttle schema is incomplete")
+
+          passkey_columns = {column["name"] for column in inspector.get_columns("passkey_credentials")}
+          expected_passkey_columns = {
+              "credential_id",
+              "credential_public_key",
+              "sign_count",
+              "user_id",
+              "tenant_id",
+              "backed_up",
+              "created_at",
+              "last_used_at",
+              "revoked_at",
+          }
+          if not expected_passkey_columns.issubset(passkey_columns):
+              raise SystemExit("Passkey credential schema is incomplete")
+
+          ceremony_columns = {column["name"] for column in inspector.get_columns("webauthn_ceremonies")}
+          expected_ceremony_columns = {
+              "ceremony_id",
+              "purpose",
+              "user_id",
+              "challenge",
+              "expires_at",
+              "used_at",
+          }
+          if not expected_ceremony_columns.issubset(ceremony_columns):
+              raise SystemExit("WebAuthn ceremony schema is incomplete")
 
           print("Migration tables verified:", sorted(tables))
           PY
