@@ -97,6 +97,7 @@ jobs:
               "content_dependencies",
               "content_impact_assessments",
               "realtime_access_tickets",
+              "browser_sessions",
               "audit_log",
           }
           missing = required - tables
@@ -111,6 +112,18 @@ jobs:
           expected_ticket_columns = {"token_hash", "user_id", "tenant_id", "expires_at", "used_at"}
           if not expected_ticket_columns.issubset(ticket_columns):
               raise SystemExit("Realtime ticket schema is incomplete")
+
+          session_columns = {column["name"] for column in inspector.get_columns("browser_sessions")}
+          expected_session_columns = {
+              "session_hash",
+              "csrf_hash",
+              "user_id",
+              "tenant_id",
+              "expires_at",
+              "revoked_at",
+          }
+          if not expected_session_columns.issubset(session_columns):
+              raise SystemExit("Browser session schema is incomplete")
 
           print("Migration tables verified:", sorted(tables))
           PY
