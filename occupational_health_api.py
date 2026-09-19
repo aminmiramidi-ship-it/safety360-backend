@@ -1,6 +1,6 @@
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, Literal
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -96,6 +96,19 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _as_utc(value: datetime) -> datetime:
+    """Normalize persisted and external datetimes to aware UTC values.
+
+    SQLite may round-trip timezone-aware SQLAlchemy DateTime values as naive
+    datetimes. Safety360 stores and compares internal timestamps as UTC, so a
+    naive persisted value is interpreted as UTC instead of being compared with
+    an aware timestamp directly.
+    """
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _require_tenant(user: User) -> int:
     if user.tenant_id is None:
         raise HTTPException(status_code=409, detail="Benutzer ist keinem Mandanten zugeordnet.")
@@ -143,7 +156,8 @@ def _serialize_case(item: OccupationalHealthCase) -> dict[str, object]:
 
 def _status_for(case: OccupationalHealthCase, requirement: OccupationalHealthRequirement) -> tuple[str, str, str]:
     now = _now()
-    next_due = case.next_due_at or case.due_at
+    raw_next_due = case.next_due_at or case.due_at
+    next_due = _as_utc(raw_next_due) if raw_next_due is not None else None
     if case.evidence_state == "verified" and next_due is not None:
         if next_due > now + timedelta(days=requirement.due_soon_days):
             return "green", "compliant", "Administrativer Nachweis ist verifiziert; nächste Fälligkeit liegt außerhalb der Vorwarnfrist."
@@ -197,11 +211,21 @@ def _find_overlap(
     duration_minutes: int,
 ) -> tuple[datetime, datetime] | None:
     duration = timedelta(minutes=duration_minutes)
-    for employee in sorted(employee_windows, key=lambda item: item.start):
-        for provider in sorted(provider_windows, key=lambda item: item.start):
-            start = max(employee.start, provider.start)
-            end = min(employee.end, provider.end)
-            if employee.end > employee.start and provider.end > provider.start and end - start >= duration:
+    employees = sorted(employee_windows, key=lambda item: _as_utc(item.start))
+    providers = sorted(provider_windows, key=lambda item: _as_utc(item.start))
+    for employee in employees:
+        employee_start = _as_utc(employee.start)
+        employee_end = _as_utc(employee.end)
+        if employee_end <= employee_start:
+            continue
+        for provider in providers:
+            provider_start = _as_utc(provider.start)
+            provider_end = _as_utc(provider.end)
+            if provider_end <= provider_start:
+                continue
+            start = max(employee_start, provider_start)
+            end = min(employee_end, provider_end)
+            if end - start >= duration:
                 return start, start + duration
     return None
 
@@ -259,7 +283,7 @@ def upsert_case(data: CaseUpsert, current_user: CurrentUser, db: DBSession):
     item.employee_user_id = data.employee_user_id
     item.manager_ref = data.manager_ref.strip() if data.manager_ref else None
     item.provider_ref = data.provider_ref.strip() if data.provider_ref else None
-    item.due_at = data.due_at
+    item.due_at = _as_utc(data.due_at) if data.due_at is not None else None
     item.last_evaluated_at = _now()
     item.human_review_required = True
     db.flush()
@@ -384,8 +408,8 @@ def add_evidence(data: EvidenceCreate, current_user: CurrentUser, db: DBSession)
         case_id=case.id,
         evidence_type=normalized_type,
         file_ref=data.file_ref.strip() if data.file_ref else None,
-        issued_at=data.issued_at,
-        next_due_at=data.next_due_at,
+        issued_at=_as_utc(data.issued_at) if data.issued_at is not None else None,
+        next_due_at=_as_utc(data.next_due_at) if data.next_due_at is not None else None,
         source=data.source.strip().lower(),
         contains_clinical_findings=data.contains_clinical_findings,
         employer_access_allowed=employer_access,
@@ -425,9 +449,10 @@ def verify_evidence(evidence_id: int, data: EvidenceVerify, current_user: Curren
     item.verified_at = _now() if data.verified else None
     if data.verified:
         case.evidence_state = "verified"
-        case.last_completed_at = item.issued_at or _now()
+        completed_at = item.issued_at or _now()
+        case.last_completed_at = _as_utc(completed_at)
         if item.next_due_at:
-            case.next_due_at = item.next_due_at
+            case.next_due_at = _as_utc(item.next_due_at)
         elif requirement.recurrence_days:
             case.next_due_at = case.last_completed_at + timedelta(days=requirement.recurrence_days)
         color, state, summary = _status_for(case, requirement)
