@@ -26,6 +26,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60")
 ENVIRONMENT = os.getenv("SAFETY360_ENV", "development").lower()
 SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "safety360_session")
 CSRF_COOKIE_NAME = os.getenv("CSRF_COOKIE_NAME", "safety360_csrf")
+CSRF_HEADER_NAME = os.getenv("CSRF_HEADER_NAME", "X-Requested-With")
 SESSION_TTL_MINUTES = max(15, min(int(os.getenv("BROWSER_SESSION_TTL_MINUTES", "480")), 10080))
 SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "lax").strip().lower()
 SESSION_COOKIE_SECURE = ENVIRONMENT == "production" or os.getenv(
@@ -187,7 +188,7 @@ def _user_from_browser_session(request: Request, db: Session) -> User | None:
         return None
 
     if request.method.upper() in UNSAFE_METHODS:
-        csrf_header = request.headers.get("X-CSRF-Token")
+        csrf_header = request.headers.get(CSRF_HEADER_NAME)
         csrf_cookie = request.cookies.get(CSRF_COOKIE_NAME)
         if (
             not csrf_header
