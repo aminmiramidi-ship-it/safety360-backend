@@ -1,7 +1,15 @@
-import json
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 
 from database import Base
 
@@ -43,14 +51,6 @@ class ComplianceSubject(Base):
     )
     created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
-
-    @property
-    def metadata(self) -> dict[str, object]:
-        try:
-            value = json.loads(self.metadata_json or "{}")
-            return value if isinstance(value, dict) else {}
-        except (TypeError, ValueError):
-            return {}
 
 
 class RequirementRelation(Base):

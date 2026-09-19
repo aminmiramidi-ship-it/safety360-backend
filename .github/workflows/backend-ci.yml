@@ -5,21 +5,11 @@ on:
   push:
     branches:
       - main
-      - safety360-phase1-auth
-      - safety360-platform-core
-      - safety360-i18n-core
-      - safety360-agent-orchestration
-      - safety360-agent-memory
-      - safety360-secure-ingestion
-      - safety360-privacy-governance
+      - "safety360-*"
   pull_request:
     branches:
       - main
-      - safety360-platform-core
-      - safety360-i18n-core
-      - safety360-agent-orchestration
-      - safety360-agent-memory
-      - safety360-secure-ingestion
+      - "safety360-*"
 
 permissions:
   contents: read
@@ -82,6 +72,25 @@ jobs:
               "privacy_impact_assessments",
               "privacy_retention_rules",
               "privacy_data_subject_requests",
+              "regulatory_sources",
+              "regulatory_requirements",
+              "regulatory_changes",
+              "industry_classifications",
+              "tenant_industry_profiles",
+              "industry_activity_templates",
+              "dguv_publications",
+              "dguv_catalog_changes",
+              "compliance_subjects",
+              "requirement_relations",
+              "applicability_assessments",
+              "regulatory_impact_actions",
+              "tenant_integrations",
+              "integration_events",
+              "occupational_health_requirements",
+              "occupational_health_cases",
+              "occupational_health_appointments",
+              "occupational_health_evidence",
+              "occupational_health_notifications",
               "audit_log",
           }
           missing = required - tables

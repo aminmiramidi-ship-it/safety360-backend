@@ -5,21 +5,11 @@ on:
   push:
     branches:
       - main
-      - safety360-phase1-auth
-      - safety360-platform-core
-      - safety360-i18n-core
-      - safety360-agent-orchestration
-      - safety360-agent-memory
-      - safety360-secure-ingestion
-      - safety360-privacy-governance
+      - "safety360-*"
   pull_request:
     branches:
       - main
-      - safety360-platform-core
-      - safety360-i18n-core
-      - safety360-agent-orchestration
-      - safety360-agent-memory
-      - safety360-secure-ingestion
+      - "safety360-*"
   schedule:
     - cron: "15 4 * * 1"
 
