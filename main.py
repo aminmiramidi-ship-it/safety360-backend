@@ -19,6 +19,7 @@ from auth import get_current_user
 from auth import router as auth_router
 from billing_api import router as billing_router
 from database import Base, engine, get_db
+from dguv_catalog_api import router as dguv_catalog_router
 from dguv_v2_api import router as dguv_v2_router
 from documents import router as document_router
 from files_api import router as file_router
@@ -41,7 +42,7 @@ from sso_api import router as sso_router
 from tenants import router as tenant_router
 from translation_api import router as translation_router
 
-APP_VERSION = "2.2.0"
+APP_VERSION = "2.3.0"
 ENVIRONMENT = os.getenv("SAFETY360_ENV", "development").lower()
 MAX_IMPORT_BYTES = int(os.getenv("MAX_IMPORT_BYTES", str(20 * 1024 * 1024)))
 
@@ -80,8 +81,9 @@ app = FastAPI(
     description=(
         "Safety360 Backend für HSE, IMS, Datenschutz-Governance, Regulatory Intelligence, "
         "branchenbezogene Tätigkeits- und Prozessintelligenz, DGUV-basierte deutsche "
-        "Arbeitsschutzgrundlagen, Dokumente, Ablage, Tickets, KI, Übersetzung, adaptive "
-        "Agent-Orchestrierung, Enterprise-SSO und Plattformdienste."
+        "Arbeitsschutzgrundlagen mit lizenz-/rechtebewusster Quellen-Governance, Dokumente, "
+        "Ablage, Tickets, KI, Übersetzung, adaptive Agent-Orchestrierung, Enterprise-SSO und "
+        "Plattformdienste."
     ),
 )
 
@@ -142,6 +144,11 @@ app.include_router(ims_router, prefix="/ims", tags=["IMS Orchestration"])
 app.include_router(industry_router, prefix="/industry", tags=["Industry Intelligence"])
 app.include_router(privacy_router, prefix="/privacy", tags=["Privacy & GDPR Governance"])
 app.include_router(regulatory_router, prefix="/regulatory", tags=["Regulatory Intelligence"])
+app.include_router(
+    dguv_catalog_router,
+    prefix="/regulatory/de/dguv-catalog",
+    tags=["DE Regulatory - DGUV Catalog Governance"],
+)
 app.include_router(
     dguv_v2_router,
     prefix="/regulatory/de/dguv-v2-2024",
