@@ -9,11 +9,15 @@ on:
       - safety360-platform-core
       - safety360-i18n-core
       - safety360-agent-orchestration
+      - safety360-agent-memory
+      - safety360-secure-ingestion
   pull_request:
     branches:
       - main
       - safety360-platform-core
       - safety360-i18n-core
+      - safety360-agent-orchestration
+      - safety360-agent-memory
 
 permissions:
   contents: read
@@ -61,11 +65,17 @@ jobs:
               "tickets",
               "documents",
               "stored_files",
+              "file_ingestion_records",
               "assistant_threads",
               "assistant_messages",
               "tenant_subscriptions",
               "ims_activities",
               "ims_artifacts",
+              "agent_runs",
+              "agent_feedback",
+              "tenant_identity_providers",
+              "federated_identities",
+              "sso_exchange_codes",
               "audit_log",
           }
           missing = required - tables

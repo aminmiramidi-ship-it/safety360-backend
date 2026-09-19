@@ -3,6 +3,8 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import create_engine, pool
 
+import identity_models  # noqa: F401
+import ingestion_models  # noqa: F401
 import models  # noqa: F401
 from database import DATABASE_URL, Base
 

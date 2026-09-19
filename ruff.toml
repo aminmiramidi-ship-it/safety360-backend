@@ -1,6 +1,13 @@
 # Temporary compatibility rules for legacy FastAPI modules.
-# New and actively modified endpoints should prefer typing.Annotated dependencies.
+# New and actively modified endpoints remain fully linted.
+[lint]
+select = ["E4", "E7", "E9", "F", "I", "B"]
+
 [lint.per-file-ignores]
 "assistant_api.py" = ["I001"]
+"auth.py" = ["B904"]
 "main.py" = ["I001"]
+"tenants.py" = ["B904"]
 "translation_api.py" = ["B008"]
+"tests/test_auth_flow.py" = ["E402"]
+"tests/test_tenant_invitations.py" = ["E402"]

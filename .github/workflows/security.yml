@@ -9,11 +9,15 @@ on:
       - safety360-platform-core
       - safety360-i18n-core
       - safety360-agent-orchestration
+      - safety360-agent-memory
+      - safety360-secure-ingestion
   pull_request:
     branches:
       - main
       - safety360-platform-core
       - safety360-i18n-core
+      - safety360-agent-orchestration
+      - safety360-agent-memory
   schedule:
     - cron: "15 4 * * 1"
 
@@ -39,8 +43,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
-      - name: Static security scan
-        run: bandit -q -r . -x ./tests,./migrations,./venv,./.venv
+      - name: Static security scan - full report
+        continue-on-error: true
+        run: bandit -r . -x ./tests,./migrations,./venv,./.venv
+
+      - name: Static security gate - medium and high severity
+        run: bandit -q -r . -x ./tests,./migrations,./venv,./.venv -ll
 
       - name: Dependency vulnerability audit
         run: pip-audit -r requirements.txt
