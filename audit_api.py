@@ -14,6 +14,11 @@ router = APIRouter()
 
 DBSession = Annotated[Session, Depends(get_db)]
 CurrentUser = Annotated[User, Depends(get_current_user)]
+EventLimit = Annotated[int, Query(ge=1, le=500)]
+ExportLimit = Annotated[int, Query(ge=1, le=5000)]
+BeforeId = Annotated[int | None, Query(ge=1)]
+ActionFilter = Annotated[str | None, Query(max_length=120)]
+ObjectTypeFilter = Annotated[str | None, Query(max_length=120)]
 
 
 def _resolve_tenant_scope(current_user: User, requested_tenant_id: int | None) -> int | None:
@@ -40,10 +45,10 @@ def list_audit_events(
     current_user: CurrentUser,
     db: DBSession,
     tenant_id: int | None = None,
-    limit: int = Query(default=100, ge=1, le=500),
-    before_id: int | None = Query(default=None, ge=1),
-    action: str | None = Query(default=None, max_length=120),
-    object_type: str | None = Query(default=None, max_length=120),
+    limit: EventLimit = 100,
+    before_id: BeforeId = None,
+    action: ActionFilter = None,
+    object_type: ObjectTypeFilter = None,
 ):
     require_permission(current_user, "audit.read")
     scope_tenant_id = _resolve_tenant_scope(current_user, tenant_id)
@@ -84,7 +89,7 @@ def export_audit_events(
     current_user: CurrentUser,
     db: DBSession,
     tenant_id: int | None = None,
-    limit: int = Query(default=1000, ge=1, le=5000),
+    limit: ExportLimit = 1000,
 ):
     require_permission(current_user, "audit.export")
     scope_tenant_id = _resolve_tenant_scope(current_user, tenant_id)
